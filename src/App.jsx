@@ -294,17 +294,39 @@ export default function App() {
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const accounts = await provider.send("eth_requestAccounts", []);
-      const network = await provider.getNetwork();
+      
+      // REMOVED THE STRICT SEPOLIA CHECK HERE TO ALLOW TESTING
+      
+      const signer = await provider.getSigner();
+      const _contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
 
-      if (network.chainId !== SEPOLIA_ID) {
-        try {
-          await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xaa36a7' }] });
-        } catch (e) {
-          toast.error("Please switch to Sepolia Network");
-          setLoading(false);
-          return;
+      setAccount(accounts[0].toLowerCase());
+      setContract(_contract);
+
+      // Check User Registration
+      try {
+        const user = await _contract.users(accounts[0]);
+        // Ethers v6 returns an array-like object. 
+        // We check user[1] because in the struct: string name (0), bool exists (1)
+        if (user.exists || user[1] === true) {
+          setIsRegistered(true);
+          toast.success(`Welcome back!`);
+        } else {
+          setIsRegistered(false);
         }
+      } catch (err) {
+        console.error("User Check Error:", err);
+        // If the check fails, assume not registered so we don't block the UI
+        setIsRegistered(false); 
       }
+      
+    } catch (err) {
+      console.error(err);
+      toast.error("Connection Failed: " + (err.reason || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
 
       // Check if Contract Exists at Address
       const code = await provider.getCode(CONTRACT_ADDRESS);
@@ -343,19 +365,39 @@ export default function App() {
     }
   };
 
-  // REGISTER USER
+ // REGISTER USER
   const handleRegister = async () => {
     if (!registerName.trim()) return toast.warn("Enter a name");
+    
     setIsRegistering(true);
     try {
-      const tx = await contract.registerUser(registerName);
-      toast.info("Registering... please wait");
+      console.log("Attempting to register with name:", registerName);
+      
+      // 1. Force a manual Gas Limit (Fixes mobile estimation errors)
+      const tx = await contract.register(registerName, {
+        gasLimit: 300000 
+      });
+
+      toast.info("Transaction sent! Waiting for confirmation...");
+      
+      // 2. Wait for transaction to finish
       await tx.wait();
+      
       setIsRegistered(true);
-      toast.success("Profile Created!");
+      toast.success("Profile Created Successfully!");
+      
     } catch (err) {
-      console.error(err);
-      toast.error(err.reason || "Registration failed");
+      console.error("Registration Error:", err);
+      
+      // 3. Show the ACTUAL error message on the phone screen
+      if (err.reason) {
+        toast.error(`Failed: ${err.reason}`);
+      } else if (err.message) {
+        // Slice the error message to make it readable on phone
+        toast.error(`Error: ${err.message.slice(0, 50)}...`);
+      } else {
+        toast.error("Registration failed. Check console.");
+      }
     } finally {
       setIsRegistering(false);
     }
