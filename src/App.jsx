@@ -356,69 +356,75 @@ export default function App() {
   };
 
     // REGISTER USER (FINAL FIXED VERSION)
-    const handleRegister = async () => {
-      if (!registerName.trim()) {
-        toast.warn("Enter a name");
-        return;
-      }
+    const GAS_REGISTER = 250000;
 
-      if (!contract || !account) {
-        toast.error("Wallet not connected");
-        return;
-      }
+const handleRegister = async () => {
+  if (!registerName.trim()) {
+    toast.warn("Enter a name");
+    return;
+  }
 
-      setIsRegistering(true);
+  if (!contract || !account) {
+    toast.error("Wallet not connected");
+    return;
+  }
 
-      try {
-        console.log(" Registering user with name:", registerName);
+  setIsRegistering(true);
 
-        // 1️⃣ Send transaction (manual gas avoids mobile estimation bugs)
-        const tx = await contract.register(registerName, {
-          gasLimit: 300000
-        });
+  try {
+    console.log("📝 Registering user with name:", registerName);
 
-        toast.info("⏳ Transaction sent. Waiting for confirmation...");
+    // 🔒 1️⃣ PRE-CHECK: already registered?
+    const existingUser = await contract.users(account);
+    if (existingUser[1]) {
+      toast.warn("You are already registered");
+      return;
+    }
 
-        // 2️⃣ Wait for confirmation
-        await tx.wait();
+    // ⚡ 2️⃣ Force nonce + optimized gas (mobile-safe)
+    const signer = await contract.runner.getSigner();
+    const nonce = await signer.getNonce();
 
-        // 3️⃣ Re-fetch user data from blockchain (SOURCE OF TRUTH)
-        const updatedUser = await contract.users(account);
+    const tx = await contract.register(registerName.trim(), {
+      gasLimit: GAS_REGISTER,
+      nonce
+    });
 
-        // ethers v6 struct → array-based
-        const exists = Boolean(updatedUser[1]);
+    toast.info("⏳ Registering on blockchain...");
+    await tx.wait();
 
-        if (!exists) {
-          throw new Error("Registration failed on-chain");
-        }
+    // 🔄 3️⃣ Re-validate on-chain state
+    const updatedUser = await contract.users(account);
+    if (!updatedUser[1]) {
+      throw new Error("Registration failed on-chain");
+    }
 
-        // 4️⃣ Update UI state ONLY after confirmed success
-        setIsRegistered(true);
-        toast.success(" Profile created successfully!");
+    // ✅ 4️⃣ Update UI
+    setIsRegistered(true);
+    toast.success("✅ Profile created successfully!");
 
-      } catch (err) {
-        console.error(" Registration Error:", err);
+  } catch (err) {
+    console.error("❌ Registration Error:", err);
 
-        // User rejected TX
-        if (err.code === "ACTION_REJECTED" || err.code === 4001) {
-          toast.warn("Transaction rejected");
-        }
-        // Contract revert reason
-        else if (err.reason) {
-          toast.error(`Failed: ${err.reason}`);
-        }
-        // Generic fallback
-        else if (err.message) {
-          toast.error(`Error: ${err.message.slice(0, 80)}`);
-        }
-        else {
-          toast.error("Registration failed. Check console.");
-        }
-
-      } finally {
-        setIsRegistering(false);
-      }
-    };
+    // ❌ User rejected
+    if (err.code === 4001 || err.code === "ACTION_REJECTED") {
+      toast.warn("Transaction rejected");
+    }
+    // ❌ Contract revert (most important)
+    else if (err.reason) {
+      toast.error(err.reason);
+    }
+    // ❌ Deep MetaMask error
+    else if (err?.info?.error?.message) {
+      toast.error(err.info.error.message);
+    }
+    else {
+      toast.error("Transaction failed");
+    }
+  } finally {
+    setIsRegistering(false);
+  }
+};
 
   // SEND MESSAGE
   const sendMessage = async () => {
