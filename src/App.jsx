@@ -16,7 +16,7 @@ import 'react-toastify/dist/ReactToastify.css';
 // 🛑 IMPORTANT: PASTE YOUR DEPLOYED SMART CONTRACT ADDRESS HERE
 // DO NOT PASTE YOUR WALLET ADDRESS
 // ------------------------------------------------------------------
-const CONTRACT_ADDRESS = "0xA6CC5D2F20E9d0c6Cd5C0D1dF87DB479801d0dC1"; 
+const CONTRACT_ADDRESS = "0xdE58cf41357F3aAa2892Cc50b4b3c19F9A9d470f"; 
 
 const SEPOLIA_ID = 11155111n;
 
