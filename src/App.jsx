@@ -285,7 +285,7 @@ export default function App() {
     const interval = setInterval(fetchHistory, 2000); 
     return () => clearInterval(interval);
   }, [contract, account]);
-// CONNECT WALLET (Debug Version)
+  // CONNECT WALLET (Debug Version)
   const connectWallet = async () => {
     // 1. Check if Wallet is installed
     if (!window.ethereum) {
@@ -396,13 +396,15 @@ export default function App() {
     }
   };
 
-  // SEND MESSAGE
+ // SEND MESSAGE (Updated with Mobile Fixes)
   const sendMessage = async () => {
+    // 1. Validation
     if (!messageInput.trim() || !activeChat) return;
     
     const textToSend = messageInput;
-    setMessageInput(""); 
+    setMessageInput(""); // Clear input immediately for UX
 
+    // 2. Optimistic Update (Show pending message)
     const tempMsg = {
       sender: account,
       receiver: activeChat.address,
@@ -413,30 +415,59 @@ export default function App() {
     setAllMessages(prev => [...prev, tempMsg]);
     
     try {
+      console.log(`Checking user: ${activeChat.address}`);
+      
+      // 3. CHECK RECIPIENT REGISTRATION
+      // We check this BEFORE sending money/gas to prevent failed transactions
       const recipientProfile = await contract.users(activeChat.address);
-      if (!recipientProfile.exists) throw new Error("RECIPIENT_NOT_REGISTERED");
+      
+      // FIX: Ethers v6 returns array-like structs. 
+      // We check both property (.exists) and index ([1]) to be safe.
+      const recipientExists = recipientProfile.exists || recipientProfile[1];
 
-      const tx = await contract.sendMessage(activeChat.address, textToSend);
-      toast.info("Sending...");
-      await tx.wait();
-      toast.success("Sent!");
+      if (!recipientExists) {
+        throw new Error("RECIPIENT_NOT_REGISTERED");
+      }
+
+      // 4. SEND TRANSACTION
+      // FIX: Added { gasLimit: 300000 } to prevent mobile wallet crashes
+      const tx = await contract.sendMessage(activeChat.address, textToSend, {
+        gasLimit: 300000 
+      });
+
+      toast.info("Transaction sent. Waiting for block...");
+      await tx.wait(); // Wait for confirmation
+      
+      toast.success("Message Sent!");
       
     } catch (err) {
       console.error("Send Error:", err);
+      
+      // Revert UI changes since it failed
       setAllMessages(prev => prev.filter(m => m !== tempMsg)); 
       setMessageInput(textToSend);
 
+      // 5. Specific Error Handling
       if (err.message.includes("RECIPIENT_NOT_REGISTERED")) {
-        toast.error("User not registered!");
+        toast.error("This user is not registered on the blockchain!");
+      } else if (err.code === "ACTION_REJECTED") {
+        toast.warn("You rejected the transaction.");
+      } else if (err.reason) {
+         // Contract error (like "Recipient is not registered")
+        toast.error(`Failed: ${err.reason}`);
       } else {
-        toast.error("Transaction failed");
+        toast.error("Transaction failed. Check network.");
       }
     }
   };
 
+  // ADD CONTACT (Local Storage)
   const handleAddContact = () => {
     if (!newContactName || !newContactAddress) return toast.warn("Fill all fields");
-    if (!ethers.isAddress(newContactAddress)) return toast.error("Invalid Address");
+    
+    if (!ethers.isAddress(newContactAddress)) {
+      return toast.error("Invalid Ethereum Address");
+    }
     
     const newContact = {
       id: Date.now(),
@@ -445,19 +476,22 @@ export default function App() {
       addedAt: Date.now()
     };
 
+    // Save to State and LocalStorage
     const updated = [...contacts, newContact];
     setContacts(updated);
     localStorage.setItem('chainchat_contacts', JSON.stringify(updated));
+    
     setIsAddContactOpen(false);
     setNewContactName("");
     setNewContactAddress("");
-    toast.success("Contact Saved");
+    toast.success("Contact Saved Locally");
   };
 
+  // AUTO SCROLL TO BOTTOM
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [currentChatMessages, activeChat]);
-
+  
   // RENDER
   if (!account) {
     return (
