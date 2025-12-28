@@ -237,54 +237,51 @@ export default function App() {
   const [isRegistering, setIsRegistering] = useState(false);
 
   const messagesEndRef = useRef(null);
+    //pooling
+      useEffect(() => {
+        const saved = localStorage.getItem('chainchat_contacts');
+        if (saved) setContacts(JSON.parse(saved));
+      }, []);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('chainchat_contacts');
-    if (saved) setContacts(JSON.parse(saved));
-  }, []);
+      // Filter messages for current chat
+      const currentChatMessages = useMemo(() => {
+        if (!activeChat || !account) return [];
+        const activeAddr = activeChat.address.toLowerCase();
+        const myAddr = account.toLowerCase();
 
-  // Filter messages for current chat
-  const currentChatMessages = useMemo(() => {
-    if (!activeChat || !account) return [];
-    const activeAddr = activeChat.address.toLowerCase();
-    const myAddr = account.toLowerCase();
+        return allMessages.filter(msg => 
+          (msg.sender.toLowerCase() === myAddr && msg.receiver.toLowerCase() === activeAddr) ||
+          (msg.sender.toLowerCase() === activeAddr && msg.receiver.toLowerCase() === myAddr)
+        ).sort((a, b) => a.timestamp - b.timestamp);
+      }, [allMessages, activeChat, account]);
 
-    return allMessages.filter(msg => 
-      (msg.sender.toLowerCase() === myAddr && msg.receiver.toLowerCase() === activeAddr) ||
-      (msg.sender.toLowerCase() === activeAddr && msg.receiver.toLowerCase() === myAddr)
-    ).sort((a, b) => a.timestamp - b.timestamp);
-  }, [allMessages, activeChat, account]);
+    useEffect(() => {
+      if (!contract || !account || !activeChat) return;
 
-  // POLL MESSAGES
-  useEffect(() => {
-    if (!contract || !account) return;
+      const fetchHistory = async () => {
+        try {
+          const data = await contract.getMessages(
+            account,
+            activeChat.address
+          );
 
-    const fetchHistory = async () => {
-      try {
-        const data = await contract.getUserMessages();
-        const formatted = data.map(msg => ({
-          sender: msg.sender,
-          receiver: msg.receiver,
-          text: msg.content,
-          timestamp: Number(msg.timestamp) * 1000,
-          pending: false
-        }));
+          const formatted = data.map(msg => ({
+            sender: msg.sender,
+            receiver: msg.receiver,
+            text: msg.content,
+            timestamp: Number(msg.timestamp) * 1000,
+            pending: false
+          }));
 
-        if (formatted.length !== allMessages.filter(m => !m.pending).length) {
-          setAllMessages(prev => {
-             const pending = prev.filter(m => m.pending);
-             return [...formatted, ...pending];
-          });
+          setAllMessages(formatted);
+        } catch (err) {
+          console.error("Message fetch error:", err);
         }
-      } catch (err) {
-        console.error("Polling error:", err);
-      }
-    };
+      };
 
-    fetchHistory();
-    const interval = setInterval(fetchHistory, 2000); 
-    return () => clearInterval(interval);
-  }, [contract, account]);
+      fetchHistory();
+    }, [contract, account, activeChat]);
+
   // CONNECT WALLET (Debug Version)
   const connectWallet = async () => {
     // 1. Check if Wallet is installed
@@ -358,51 +355,89 @@ export default function App() {
     }
   };
 
- // REGISTER USER
-  const handleRegister = async () => {
-    if (!registerName.trim()) return toast.warn("Enter a name");
-    
-    setIsRegistering(true);
-    try {
-      console.log("Attempting to register with name:", registerName);
-      
-      // 1. Force a manual Gas Limit (Fixes mobile estimation errors)
-      const tx = await contract.register(registerName, {
-        gasLimit: 300000 
-      });
-
-      toast.info("Transaction sent! Waiting for confirmation...");
-      
-      // 2. Wait for transaction to finish
-      await tx.wait();
-      
-      setIsRegistered(true);
-      toast.success("Profile Created Successfully!");
-      
-    } catch (err) {
-      console.error("Registration Error:", err);
-      
-      // 3. Show the ACTUAL error message on the phone screen
-      if (err.reason) {
-        toast.error(`Failed: ${err.reason}`);
-      } else if (err.message) {
-        // Slice the error message to make it readable on phone
-        toast.error(`Error: ${err.message.slice(0, 50)}...`);
-      } else {
-        toast.error("Registration failed. Check console.");
+    // REGISTER USER (FINAL FIXED VERSION)
+    const handleRegister = async () => {
+      if (!registerName.trim()) {
+        toast.warn("Enter a name");
+        return;
       }
-    } finally {
-      setIsRegistering(false);
-    }
-  };
 
- // SEND MESSAGE (Updated with Mobile Fixes)
+      if (!contract || !account) {
+        toast.error("Wallet not connected");
+        return;
+      }
+
+      setIsRegistering(true);
+
+      try {
+        console.log(" Registering user with name:", registerName);
+
+        // 1️⃣ Send transaction (manual gas avoids mobile estimation bugs)
+        const tx = await contract.register(registerName, {
+          gasLimit: 300000
+        });
+
+        toast.info("⏳ Transaction sent. Waiting for confirmation...");
+
+        // 2️⃣ Wait for confirmation
+        await tx.wait();
+
+        // 3️⃣ Re-fetch user data from blockchain (SOURCE OF TRUTH)
+        const updatedUser = await contract.users(account);
+
+        // ethers v6 struct → array-based
+        const exists = Boolean(updatedUser[1]);
+
+        if (!exists) {
+          throw new Error("Registration failed on-chain");
+        }
+
+        // 4️⃣ Update UI state ONLY after confirmed success
+        setIsRegistered(true);
+        toast.success(" Profile created successfully!");
+
+      } catch (err) {
+        console.error(" Registration Error:", err);
+
+        // User rejected TX
+        if (err.code === "ACTION_REJECTED" || err.code === 4001) {
+          toast.warn("Transaction rejected");
+        }
+        // Contract revert reason
+        else if (err.reason) {
+          toast.error(`Failed: ${err.reason}`);
+        }
+        // Generic fallback
+        else if (err.message) {
+          toast.error(`Error: ${err.message.slice(0, 80)}`);
+        }
+        else {
+          toast.error("Registration failed. Check console.");
+        }
+
+      } finally {
+        setIsRegistering(false);
+      }
+    };
+
+  // SEND MESSAGE
   const sendMessage = async () => {
     // 1. Validation
     if (!messageInput.trim() || !activeChat) return;
-    
+
+    // --- FEATURE 1: Balance Check (Prevents confusing 0 ETH errors) ---
+    try {
+      if (contract && contract.runner && contract.runner.provider) {
+         const balance = await contract.runner.provider.getBalance(account);
+         if (balance === 0n) {
+           toast.error("You have 0 ETH. You need gas fees to send.");
+           return;
+         }
+      }
+    } catch (e) { console.log("Balance check skipped", e); }
+
     const textToSend = messageInput;
-    setMessageInput(""); // Clear input immediately for UX
+    setMessageInput(""); // Clear input immediately
 
     // 2. Optimistic Update (Show pending message)
     const tempMsg = {
@@ -414,53 +449,62 @@ export default function App() {
     };
     setAllMessages(prev => [...prev, tempMsg]);
     
+    // --- TRY BLOCK STARTS ---
     try {
-      console.log(`Checking user: ${activeChat.address}`);
+      console.log(`Checking registration for: ${activeChat.address}`);
       
-      // 3. CHECK RECIPIENT REGISTRATION
-      // We check this BEFORE sending money/gas to prevent failed transactions
+      // --- FEATURE 2: Check SENDER (You) ---
+      // Fixes "Transaction Failed" if you switched accounts and forgot to register
+      const senderProfile = await contract.users(account);
+      const senderExists = senderProfile.exists || senderProfile[1];
+      if (!senderExists) throw new Error("SENDER_NOT_REGISTERED");
+
+      // --- FEATURE 3: Check RECEIVER ---
+      // Fixes sending messages to ghosts
       const recipientProfile = await contract.users(activeChat.address);
-      
-      // FIX: Ethers v6 returns array-like structs. 
-      // We check both property (.exists) and index ([1]) to be safe.
-      const recipientExists = recipientProfile.exists || recipientProfile[1];
+      const recipientExists = Boolean(recipientProfile[1]);
+      if (!recipientExists) throw new Error("RECIPIENT_NOT_REGISTERED");
 
-      if (!recipientExists) {
-        throw new Error("RECIPIENT_NOT_REGISTERED");
-      }
-
-      // 4. SEND TRANSACTION
-      // FIX: Added { gasLimit: 300000 } to prevent mobile wallet crashes
+      // --- FEATURE 4: Manual Gas Limit ---
+      // Fixes Mobile Wallet crashes
       const tx = await contract.sendMessage(activeChat.address, textToSend, {
         gasLimit: 300000 
       });
 
-      toast.info("Transaction sent. Waiting for block...");
+      toast.info("Sending transaction...");
       await tx.wait(); // Wait for confirmation
       
       toast.success("Message Sent!");
       
-    } catch (err) {
+    } 
+    // --- CATCH BLOCK (With Safe Handling) ---
+    catch (err) {
       console.error("Send Error:", err);
       
-      // Revert UI changes since it failed
+      // Revert UI (Remove the fake message)
       setAllMessages(prev => prev.filter(m => m !== tempMsg)); 
-      setMessageInput(textToSend);
+      setMessageInput(textToSend); // Put text back
 
-      // 5. Specific Error Handling
-      if (err.message.includes("RECIPIENT_NOT_REGISTERED")) {
-        toast.error("This user is not registered on the blockchain!");
-      } else if (err.code === "ACTION_REJECTED") {
-        toast.warn("You rejected the transaction.");
-      } else if (err.reason) {
-         // Contract error (like "Recipient is not registered")
-        toast.error(`Failed: ${err.reason}`);
-      } else {
-        toast.error("Transaction failed. Check network.");
+      // Safe Error Extraction (Prevents crashes)
+      const errorMessage = (err.reason || err.message || JSON.stringify(err)).toLowerCase();
+
+      if (errorMessage.includes("sender_not_registered")) {
+        toast.error("YOU are not registered. Please register first.");
+      } 
+      else if (errorMessage.includes("recipient_not_registered")) {
+        toast.error("Contact is not registered on the blockchain.");
+      } 
+      else if (errorMessage.includes("user rejected") || err.code === "ACTION_REJECTED") {
+        toast.warn("Transaction rejected.");
+      } 
+      else if (errorMessage.includes("insufficient funds")) {
+        toast.error("Not enough ETH for gas.");
+      }
+      else {
+        toast.error("Transaction Failed.");
       }
     }
   };
-
   // ADD CONTACT (Local Storage)
   const handleAddContact = () => {
     if (!newContactName || !newContactAddress) return toast.warn("Fill all fields");
