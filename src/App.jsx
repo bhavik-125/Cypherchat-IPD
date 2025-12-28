@@ -476,7 +476,7 @@ const handleRegister = async () => {
   }
 };
 
-  /
+  
 // SEND MESSAGE
 const sendMessage = async () => {
   if (!messageInput.trim() || !activeChat) return;
