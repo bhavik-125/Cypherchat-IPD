@@ -285,56 +285,25 @@ export default function App() {
     const interval = setInterval(fetchHistory, 2000); 
     return () => clearInterval(interval);
   }, [contract, account]);
-
-  // CONNECT WALLET
+// CONNECT WALLET (Debug Version)
   const connectWallet = async () => {
-    if (!window.ethereum) return toast.error("MetaMask not found!");
+    // 1. Check if Wallet is installed
+    if (!window.ethereum) {
+      toast.error("Wallet not found. Please use MetaMask app browser.");
+      return;
+    }
+    
     setLoading(true);
 
     try {
       const provider = new ethers.BrowserProvider(window.ethereum);
+      
+      // 2. Request Account Access
+      // This is where it usually fails if user rejects or app is buggy
       const accounts = await provider.send("eth_requestAccounts", []);
       
-      // REMOVED THE STRICT SEPOLIA CHECK HERE TO ALLOW TESTING
-      
-      const signer = await provider.getSigner();
-      const _contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
-
-      setAccount(accounts[0].toLowerCase());
-      setContract(_contract);
-
-      // Check User Registration
-      try {
-        const user = await _contract.users(accounts[0]);
-        // Ethers v6 returns an array-like object. 
-        // We check user[1] because in the struct: string name (0), bool exists (1)
-        if (user.exists || user[1] === true) {
-          setIsRegistered(true);
-          toast.success(`Welcome back!`);
-        } else {
-          setIsRegistered(false);
-        }
-      } catch (err) {
-        console.error("User Check Error:", err);
-        // If the check fails, assume not registered so we don't block the UI
-        setIsRegistered(false); 
-      }
-      
-    } catch (err) {
-      console.error(err);
-      toast.error("Connection Failed: " + (err.reason || err.message));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-      // Check if Contract Exists at Address
-      const code = await provider.getCode(CONTRACT_ADDRESS);
-      if (code === "0x") {
-        toast.error("No contract found at this address!");
-        console.error("The address " + CONTRACT_ADDRESS + " contains no code.");
-        setLoading(false);
-        return;
+      if (!accounts || accounts.length === 0) {
+        throw new Error("No accounts found");
       }
 
       const signer = await provider.getSigner();
@@ -343,23 +312,47 @@ export default function App() {
       setAccount(accounts[0].toLowerCase());
       setContract(_contract);
 
+      // 3. Check Registration
       try {
         const user = await _contract.users(accounts[0]);
-        if (user.exists) {
+        // Handle Struct return (Ethers v6 returns array-like structs)
+        const exists = user.exists || user[1]; 
+        
+        if (exists) {
           setIsRegistered(true);
-          toast.success(`Welcome back, ${user.name}`);
+          toast.success("Wallet Connected!");
         } else {
           setIsRegistered(false);
-          toast.info("Please create a profile");
+          toast.info("Please Register to continue");
         }
       } catch (err) {
-        console.error("User Check Error:", err);
-        toast.error("Could not check registration");
+        console.warn("User check failed (likely not registered):", err);
+        setIsRegistered(false); // Default to not registered if check fails
       }
       
     } catch (err) {
-      console.error(err);
-      toast.error("Connection Failed");
+      console.error("Detailed Connection Error:", err);
+
+      // --- SPECIFIC ERROR HANDLING ---
+      
+      // Error 4001: User clicked "Reject" in MetaMask
+      if (err.code === 4001 || (err.info && err.info.error && err.info.error.code === 4001)) {
+        toast.warn("You rejected the connection request.");
+      } 
+      // Error -32002: A popup is already open and waiting for you
+      else if (err.code === -32002) {
+        toast.info("Check your wallet. A connection request is already pending.");
+      } 
+      // Network Error
+      else if (err.code === "NETWORK_ERROR") {
+        toast.error("Network error. Check your internet or RPC URL.");
+      }
+      // Catch-all for other errors
+      else {
+        // Show the actual error message
+        toast.error("Connection Error: " + (err.reason || err.message || "Unknown"));
+      }
+      
     } finally {
       setLoading(false);
     }
