@@ -16,12 +16,37 @@ import 'react-toastify/dist/ReactToastify.css';
 // 🛑 IMPORTANT: PASTE YOUR DEPLOYED SMART CONTRACT ADDRESS HERE
 // DO NOT PASTE YOUR WALLET ADDRESS
 // ------------------------------------------------------------------
-const CONTRACT_ADDRESS = "0xdE58cf41357F3aAa2892Cc50b4b3c19F9A9d470f"; 
+const CONTRACT_ADDRESS = "0xA037ca05F67E142EF88748c752B80350cb292ae6"; 
 
 const SEPOLIA_ID = 11155111n;
 
 // ✅ YOUR EXACT ABI (Copy-pasted from your file)
 const ABI = [
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "reader",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "withUser",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "index",
+				"type": "uint256"
+			}
+		],
+		"name": "MessageRead",
+		"type": "event"
+	},
 	{
 		"anonymous": false,
 		"inputs": [
@@ -40,8 +65,14 @@ const ABI = [
 			{
 				"indexed": false,
 				"internalType": "uint256",
-				"name": "timestamp",
+				"name": "index",
 				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "bytes",
+				"name": "cipherText",
+				"type": "bytes"
 			}
 		],
 		"name": "MessageSent",
@@ -53,7 +84,7 @@ const ABI = [
 			{
 				"indexed": true,
 				"internalType": "address",
-				"name": "userAddress",
+				"name": "user",
 				"type": "address"
 			},
 			{
@@ -65,6 +96,24 @@ const ABI = [
 		],
 		"name": "UserRegistered",
 		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_with",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "_index",
+				"type": "uint256"
+			}
+		],
+		"name": "markAsRead",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
 	},
 	{
 		"inputs": [
@@ -87,9 +136,9 @@ const ABI = [
 				"type": "address"
 			},
 			{
-				"internalType": "string",
-				"name": "_content",
-				"type": "string"
+				"internalType": "bytes",
+				"name": "_cipherText",
+				"type": "bytes"
 			}
 		],
 		"name": "sendMessage",
@@ -101,13 +150,18 @@ const ABI = [
 		"inputs": [
 			{
 				"internalType": "address",
-				"name": "_user1",
+				"name": "_with",
 				"type": "address"
 			},
 			{
-				"internalType": "address",
-				"name": "_user2",
-				"type": "address"
+				"internalType": "uint256",
+				"name": "_start",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "_limit",
+				"type": "uint256"
 			}
 		],
 		"name": "getMessages",
@@ -116,27 +170,22 @@ const ABI = [
 				"components": [
 					{
 						"internalType": "address",
-						"name": "sender",
+						"name": "from",
 						"type": "address"
 					},
 					{
-						"internalType": "address",
-						"name": "receiver",
-						"type": "address"
-					},
-					{
-						"internalType": "string",
-						"name": "content",
-						"type": "string"
-					},
-					{
-						"internalType": "uint256",
+						"internalType": "uint40",
 						"name": "timestamp",
-						"type": "uint256"
+						"type": "uint40"
+					},
+					{
+						"internalType": "bytes",
+						"name": "cipherText",
+						"type": "bytes"
 					},
 					{
 						"internalType": "bool",
-						"name": "isRead",
+						"name": "read",
 						"type": "bool"
 					}
 				],
