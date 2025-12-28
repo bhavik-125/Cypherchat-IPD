@@ -6,6 +6,7 @@ import {
   MoreVertical, Loader2, UserPlus, Shield, X, Copy, Check
 } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
+import { ethers } from "ethers";
 import 'react-toastify/dist/ReactToastify.css';
 
 // ==========================================
@@ -475,91 +476,78 @@ const handleRegister = async () => {
   }
 };
 
-  // SEND MESSAGE
-  const sendMessage = async () => {
-    // 1. Validation
-    if (!messageInput.trim() || !activeChat) return;
+  /
+// SEND MESSAGE
+const sendMessage = async () => {
+  if (!messageInput.trim() || !activeChat) return;
 
-    // --- FEATURE 1: Balance Check (Prevents confusing 0 ETH errors) ---
-    try {
-      if (contract && contract.runner && contract.runner.provider) {
-         const balance = await contract.runner.provider.getBalance(account);
-         if (balance === 0n) {
-           toast.error("You have 0 ETH. You need gas fees to send.");
-           return;
-         }
-      }
-    } catch (e) { console.log("Balance check skipped", e); }
-
-    const textToSend = messageInput;
-    setMessageInput(""); // Clear input immediately
-
-    // 2. Optimistic Update (Show pending message)
-    const tempMsg = {
-      sender: account,
-      receiver: activeChat.address,
-      text: textToSend,
-      timestamp: Date.now(),
-      pending: true
-    };
-    setAllMessages(prev => [...prev, tempMsg]);
-    
-    // --- TRY BLOCK STARTS ---
-    try {
-      console.log(`Checking registration for: ${activeChat.address}`);
-      
-      // --- FEATURE 2: Check SENDER (You) ---
-      // Fixes "Transaction Failed" if you switched accounts and forgot to register
-      const senderProfile = await contract.users(account);
-      const senderExists = senderProfile.exists || senderProfile[1];
-      if (!senderExists) throw new Error("SENDER_NOT_REGISTERED");
-
-      // --- FEATURE 3: Check RECEIVER ---
-      // Fixes sending messages to ghosts
-      const recipientProfile = await contract.users(activeChat.address);
-      const recipientExists = Boolean(recipientProfile[1]);
-      if (!recipientExists) throw new Error("RECIPIENT_NOT_REGISTERED");
-
-      // --- FEATURE 4: Manual Gas Limit ---
-      // Fixes Mobile Wallet crashes
-      const tx = await contract.sendMessage(activeChat.address, textToSend, {
-        gasLimit: 300000 
-      });
-
-      toast.info("Sending transaction...");
-      await tx.wait(); // Wait for confirmation
-      
-      toast.success("Message Sent!");
-      
-    } 
-    // --- CATCH BLOCK (With Safe Handling) ---
-    catch (err) {
-      console.error("Send Error:", err);
-      
-      // Revert UI (Remove the fake message)
-      setAllMessages(prev => prev.filter(m => m !== tempMsg)); 
-      setMessageInput(textToSend); // Put text back
-
-      // Safe Error Extraction (Prevents crashes)
-      const errorMessage = (err.reason || err.message || JSON.stringify(err)).toLowerCase();
-
-      if (errorMessage.includes("sender_not_registered")) {
-        toast.error("YOU are not registered. Please register first.");
-      } 
-      else if (errorMessage.includes("recipient_not_registered")) {
-        toast.error("Contact is not registered on the blockchain.");
-      } 
-      else if (errorMessage.includes("user rejected") || err.code === "ACTION_REJECTED") {
-        toast.warn("Transaction rejected.");
-      } 
-      else if (errorMessage.includes("insufficient funds")) {
-        toast.error("Not enough ETH for gas.");
-      }
-      else {
-        toast.error("Transaction Failed.");
+  try {
+    if (contract?.runner?.provider) {
+      const balance = await contract.runner.provider.getBalance(account);
+      if (balance === 0n) {
+        toast.error("You have 0 ETH. You need gas fees to send.");
+        return;
       }
     }
+  } catch {}
+
+  const textToSend = messageInput;
+  setMessageInput("");
+
+  const tempMsg = {
+    sender: account,
+    receiver: activeChat.address,
+    text: textToSend,
+    timestamp: Date.now(),
+    pending: true
   };
+  setAllMessages(prev => [...prev, tempMsg]);
+
+  try {
+    const senderProfile = await contract.users(account);
+    if (!(senderProfile.exists || senderProfile[1])) {
+      throw new Error("SENDER_NOT_REGISTERED");
+    }
+
+    const recipientProfile = await contract.users(activeChat.address);
+    if (!Boolean(recipientProfile[1])) {
+      throw new Error("RECIPIENT_NOT_REGISTERED");
+    }
+
+    // 🔐 FIX: string → bytes
+    const encryptedBytes = ethers.toUtf8Bytes(textToSend);
+
+    const tx = await contract.sendMessage(
+      activeChat.address,
+      encryptedBytes,
+      { gasLimit: 300000 }
+    );
+
+    toast.info("Sending transaction...");
+    await tx.wait();
+    toast.success("Message Sent!");
+
+  } catch (err) {
+    console.error("Send Error:", err);
+
+    setAllMessages(prev => prev.filter(m => m !== tempMsg));
+    setMessageInput(textToSend);
+
+    const msg = (err.reason || err.message || "").toLowerCase();
+
+    if (msg.includes("sender_not_registered")) {
+      toast.error("YOU are not registered.");
+    } else if (msg.includes("recipient_not_registered")) {
+      toast.error("Contact is not registered.");
+    } else if (err.code === "ACTION_REJECTED") {
+      toast.warn("Transaction rejected.");
+    } else if (msg.includes("insufficient funds")) {
+      toast.error("Not enough ETH for gas.");
+    } else {
+      toast.error("Transaction Failed.");
+    }
+  }
+};
   // ADD CONTACT (Local Storage)
   const handleAddContact = () => {
     if (!newContactName || !newContactAddress) return toast.warn("Fill all fields");
