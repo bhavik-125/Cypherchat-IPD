@@ -514,7 +514,7 @@ const sendMessage = async () => {
       throw new Error("RECIPIENT_NOT_REGISTERED");
     }
 
-    // 🔐 FIX: string → bytes
+    // string → bytes
     const encryptedBytes = ethers.toUtf8Bytes(textToSend);
 
     const tx = await contract.sendMessage(
@@ -525,6 +525,7 @@ const sendMessage = async () => {
 
     toast.info("Sending transaction...");
     await tx.wait();
+    setAllMessages(prev => prev.filter(m => m !== tempMsg));
     toast.success("Message Sent!");
 
   } catch (err) {
