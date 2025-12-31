@@ -526,7 +526,7 @@ const sendMessage = async () => {
 
     toast.info("Sending transaction...");
     await tx.wait();
-    setAllMessages(prev => prev.filter(m => m !== tempMsg));
+    setAllMessages(prev => prev.filter(m => m.id !== tempId));
     toast.success("Message Sent!");
 
   } catch (err) {
