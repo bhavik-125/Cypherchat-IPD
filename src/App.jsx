@@ -478,78 +478,7 @@ const handleRegister = async () => {
 
   
 // SEND MESSAGE
-const sendMessage = async () => {
-  if (!messageInput.trim() || !activeChat) return;
 
-  try {
-    if (contract?.runner?.provider) {
-      const balance = await contract.runner.provider.getBalance(account);
-      if (balance === 0n) {
-        toast.error("You have 0 ETH. You need gas fees to send.");
-        return;
-      }
-    }
-  } catch {}
-
-  const textToSend = messageInput;
-  setMessageInput("");
-  const tempId = Date.now();
-  const tempMsg = {
-    id: tempId,
-    sender: account,
-    receiver: activeChat.address,
-    text: textToSend,
-    timestamp: Date.now(),
-    pending: true
-  };
-  setAllMessages(prev => [...prev, tempMsg]);
-
-  try {
-    const senderProfile = await contract.users(account);
-    if (!(senderProfile.exists || senderProfile[1])) {
-      throw new Error("SENDER_NOT_REGISTERED");
-    }
-
-    const recipientProfile = await contract.users(activeChat.address);
-    if (!Boolean(recipientProfile[1])) {
-      throw new Error("RECIPIENT_NOT_REGISTERED");
-    }
-
-    // string → bytes
-    const encryptedBytes = ethers.toUtf8Bytes(textToSend);
-
-    const tx = await contract.sendMessage(
-      activeChat.address,
-      encryptedBytes,
-      { gasLimit: 300000 }
-    );
-
-    toast.info("Sending transaction...");
-    await tx.wait();
-    setAllMessages(prev => prev.filter(m => m.id !== tempId));
-    toast.success("Message Sent!");
-
-  } catch (err) {
-    console.error("Send Error:", err);
-
-    setAllMessages(prev => prev.filter(m => m.id !== tempId));
-    setMessageInput(textToSend);
-
-    const msg = (err.reason || err.message || "").toLowerCase();
-
-    if (msg.includes("sender_not_registered")) {
-      toast.error("YOU are not registered.");
-    } else if (msg.includes("recipient_not_registered")) {
-      toast.error("Contact is not registered.");
-    } else if (err.code === "ACTION_REJECTED") {
-      toast.warn("Transaction rejected.");
-    } else if (msg.includes("insufficient funds")) {
-      toast.error("Not enough ETH for gas.");
-    } else {
-      toast.error("Transaction Failed.");
-    }
-  }
-};
   // ADD CONTACT (Local Storage)
   const handleAddContact = () => {
     if (!newContactName || !newContactAddress) return toast.warn("Fill all fields");
@@ -669,19 +598,38 @@ const sendMessage = async () => {
                 </div>
               ) : (
                 currentChatMessages.map((msg, i) => {
-                  const isMe = msg.sender.toLowerCase() === account.toLowerCase();
-                  return (
-                    <div key={i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${isMe ? 'bg-brand-600 text-white rounded-br-none' : 'bg-dark-800 text-gray-200 border border-dark-700 rounded-bl-none'} ${msg.pending ? 'opacity-70' : ''}`}>
-                        <p>{msg.text}</p>
-                        <div className="flex justify-end items-center gap-1 mt-1 text-[10px] opacity-70">
-                          {format(new Date(msg.timestamp), 'hh:mm a')}
-                          {msg.pending && <Loader2 size={10} className="animate-spin"/>}
-                        </div>
+                const isMe = msg.sender.toLowerCase() === account.toLowerCase();
+
+                return (
+                  <div key={msg.id || i} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm
+                        ${isMe
+                          ? 'bg-brand-600 text-white rounded-br-none'
+                          : 'bg-dark-800 text-gray-200 border border-dark-700 rounded-bl-none'
+                        }
+                        ${msg.status === 'sending' ? 'opacity-70' : ''}
+                        ${msg.status === 'failed' ? 'border border-red-500' : ''}
+                      `}
+                    >
+                      <p>{msg.text}</p>
+
+                      <div className="flex justify-end items-center gap-1 mt-1 text-[10px] opacity-70">
+                        {format(new Date(msg.timestamp), 'hh:mm a')}
+
+                        {msg.status === 'sending' && (
+                          <Loader2 size={10} className="animate-spin" />
+                        )}
+
+                        {msg.status === 'sent' && '📤'}
+                        {msg.status === 'confirmed' && '✅'}
+                        {msg.status === 'failed' && '❌'}
                       </div>
                     </div>
-                  )
-                })
+                  </div>
+                );
+              })
+
               )}
               <div ref={messagesEndRef} />
             </div>
