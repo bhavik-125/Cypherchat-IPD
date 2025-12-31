@@ -12,11 +12,6 @@ import 'react-toastify/dist/ReactToastify.css';
 // ==========================================
 // 1. CONFIGURATION
 // ==========================================
-
-// ------------------------------------------------------------------
-// 🛑 IMPORTANT: PASTE YOUR DEPLOYED SMART CONTRACT ADDRESS HERE
-// DO NOT PASTE YOUR WALLET ADDRESS
-// ------------------------------------------------------------------
 const CONTRACT_ADDRESS = "0xA037ca05F67E142EF88748c752B80350cb292ae6"; 
 
 const SEPOLIA_ID = 11155111n;
@@ -477,32 +472,66 @@ const handleRegister = async () => {
 };
 
   
-// SEND MESSAGE
-
-  // ADD CONTACT (Local Storage)
-  const handleAddContact = () => {
-    if (!newContactName || !newContactAddress) return toast.warn("Fill all fields");
-    
-    if (!ethers.isAddress(newContactAddress)) {
-      return toast.error("Invalid Ethereum Address");
-    }
-    
-    const newContact = {
-      id: Date.now(),
-      name: newContactName,
-      address: newContactAddress.toLowerCase(),
-      addedAt: Date.now()
+const sendMessage = async () => {
+    if (!messageInput.trim() || !activeChat) return;
+  
+    const textToSend = messageInput;
+    setMessageInput(""); // Clear UI
+  
+    // A. Optimistic Update (Show "Sending" immediately)
+    const tempId = Date.now();
+    const optimisticMsg = {
+      id: tempId,
+      sender: account,
+      receiver: activeChat.address,
+      text: textToSend,
+      timestamp: Date.now(),
+      status: "sending" // ⏳ Initial State
     };
-
-    // Save to State and LocalStorage
-    const updated = [...contacts, newContact];
-    setContacts(updated);
-    localStorage.setItem('chainchat_contacts', JSON.stringify(updated));
-    
-    setIsAddContactOpen(false);
-    setNewContactName("");
-    setNewContactAddress("");
-    toast.success("Contact Saved Locally");
+  
+    setAllMessages(prev => [...prev, optimisticMsg]);
+  
+    try {
+      // B. Mobile Check: Gas & Registration
+      if (contract.runner?.provider) {
+        const balance = await contract.runner.provider.getBalance(account);
+        if (balance === 0n) throw new Error("INSUFFICIENT_FUNDS");
+      }
+      
+      const recipientProfile = await contract.users(activeChat.address);
+      if (!recipientProfile.exists && !recipientProfile[1]) throw new Error("RECIPIENT_NOT_REGISTERED");
+  
+      // C. Send Transaction (Mobile Fix: Force Gas, No Bytes conversion)
+      const tx = await contract.sendMessage(
+        activeChat.address,
+        textToSend, 
+        { gasLimit: 500000 } // <--- Force 500k gas for mobile
+      );
+  
+      // D. Update Status -> SENT
+      setAllMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: "sent" } : m));
+      toast.info("Sending transaction...");
+  
+      // E. Wait for Block
+      await tx.wait();
+  
+      // F. Update Status -> CONFIRMED
+      setAllMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: "confirmed" } : m));
+      toast.success("Sent!");
+      
+      // Optional: definitive reload
+      loadMessages(contract);
+  
+    } catch (err) {
+      console.error("Send Error:", err);
+      // G. Update Status -> FAILED
+      setAllMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m));
+  
+      const msg = (err.reason || err.message || "").toLowerCase();
+      if (msg.includes("recipient_not_registered")) toast.error("User not registered!");
+      else if (msg.includes("insufficient_funds")) toast.error("No Gas (ETH)!");
+      else toast.error("Transaction Failed");
+    }
   };
 
   // AUTO SCROLL TO BOTTOM
