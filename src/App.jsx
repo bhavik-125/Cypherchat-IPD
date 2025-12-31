@@ -493,8 +493,9 @@ const sendMessage = async () => {
 
   const textToSend = messageInput;
   setMessageInput("");
-
+  const tempId = Date.now();
   const tempMsg = {
+    id: tempId,
     sender: account,
     receiver: activeChat.address,
     text: textToSend,
@@ -531,7 +532,7 @@ const sendMessage = async () => {
   } catch (err) {
     console.error("Send Error:", err);
 
-    setAllMessages(prev => prev.filter(m => m !== tempMsg));
+    setAllMessages(prev => prev.filter(m => m.id !== tempId));
     setMessageInput(textToSend);
 
     const msg = (err.reason || err.message || "").toLowerCase();
