@@ -1,70 +1,104 @@
-# Getting Started with Create React App
+CypherChat
+Decentralized End-to-End Encrypted Blockchain Messaging Application
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+### Overview
 
-## Available Scripts
+CypherChat is a decentralized messaging application built using blockchain technology to provide secure, tamper-resistant, and censorship-free communication. Unlike conventional messaging systems that rely on centralized servers, CypherChat ensures data integrity, transparency, and user ownership through smart contracts and cryptographic encryption.
 
-In the project directory, you can run:
+Messages are end-to-end encrypted, meaning only the sender and receiver can read the content. The blockchain stores only cryptographic proofs, not plaintext messages, ensuring privacy and efficiency.
 
-### `npm start`
+### Features
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+End-to-end encrypted messaging
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+Blockchain-backed message integrity
 
-### `npm test`
+Immutable message verification using on-chain hashes
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Wallet-based authentication (MetaMask supported)
 
-### `npm run build`
+Fully decentralized architecture
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+Responsive UI for desktop and mobile
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Real-time message updates via blockchain events
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Gas-optimized smart contracts
 
-### `npm run eject`
+### System Architecture
+┌──────────────────────┐
+│   React Frontend     │
+│   Web3 Interface     │
+└─────────┬────────────┘
+          │ Wallet Authentication
+          ▼
+┌──────────────────────┐
+│ Ethereum Blockchain  │
+│ Smart Contracts      │
+└─────────┬────────────┘
+          │ Message Hashes
+          ▼
+┌──────────────────────┐
+│ Encrypted Payloads   │
+│ Client-side Storage  │
+└──────────────────────┘
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### Technology Stack
+Frontend
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+React.js
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+Vite / Create React App
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+Tailwind CSS
 
-## Learn More
+Ethers.js / Web3.js
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Blockchain
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+Solidity
 
-### Code Splitting
+Ethereum (Sepolia Testnet)
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+MetaMask Wallet
 
-### Analyzing the Bundle Size
+Cryptography
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+AES encryption
 
-### Making a Progressive Web App
+SHA-256 hashing
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+Development Tools
 
-### Advanced Configuration
+Node.js
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+Hardhat / Truffle
 
-### Deployment
+Git and GitHub
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
 
-### `npm run build` fails to minify
+### Smart Contract Design
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+The CypherChat smart contract is responsible for:
+
+Registering message metadata
+
+Storing cryptographic message hashes
+
+Emitting events for real-time updates
+
+Maintaining sender and receiver address mappings
+
+Message contents are never stored on-chain, ensuring privacy and minimizing gas costs.
+
+### Security Model
+
+Client-side encryption before message transmission
+
+Only hashed data stored on blockchain
+
+No centralized message database
+
+Wallet-based identity management
+
+Immutable records prevent tampering
