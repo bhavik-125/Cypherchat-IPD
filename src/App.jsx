@@ -471,6 +471,33 @@ const handleRegister = async () => {
     setIsRegistering(false);
   }
 };
+const handleAddContact = () => {
+  if (!newContactName.trim() || !newContactAddress.trim()) {
+    toast.error("Please fill all fields");
+    return;
+  }
+
+  if (!newContactAddress.startsWith("0x")) {
+    toast.error("Invalid address format");
+    return;
+  }
+
+  // Example: Add to local state (you probably have contacts state)
+  setContacts(prev => [
+    ...prev,
+    {
+      name: newContactName.trim(),
+      address: newContactAddress.trim()
+    }
+  ]);
+
+  toast.success("Contact added!");
+
+  setNewContactName("");
+  setNewContactAddress("");
+  setIsAddContactOpen(false);
+};
+
 
   
 const sendMessage = async () => {
