@@ -3,10 +3,15 @@
 @tailwind utilities;
 
 body {
-  @apply bg-dark-900 text-white overflow-hidden;
+  @apply bg-dark-900 text-white;
 }
 
-/* Custom Scrollbar for Chat */
+/* IMPORTANT */
+html, body, #root {
+  height: 100%;
+}
+
+/* Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }

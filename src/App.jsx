@@ -6,8 +6,8 @@ import {
   MoreVertical, Loader2, UserPlus, Shield, X, Copy, Check
 } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
-import { ethers } from "ethers";
 import 'react-toastify/dist/ReactToastify.css';
+import './index.css';
 
 // ==========================================
 // 1. CONFIGURATION
