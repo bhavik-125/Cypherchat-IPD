@@ -12,7 +12,7 @@ import './index.css';
 // ==========================================
 // 1. CONFIGURATION
 // ==========================================
-const CONTRACT_ADDRESS = "0xA037ca05F67E142EF88748c752B80350cb292ae6"; 
+const CONTRACT_ADDRESS = "0xE55A801bbeb3635fe8D74d8F798E070eE6c9f960"; 
 
 const SEPOLIA_ID = 11155111n;
 
