@@ -2,6 +2,20 @@
   "name": "cypherchat-ipd",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src/**/*.{js,jsx,ts,tsx}",
+    "lint:fix": "eslint src/**/*.{js,jsx,ts,tsx} --fix",
+    "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,scss}\"",
+    "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,json,css,scss}\"",
+    "type-check": "tsc --noEmit",
+    "generate-icons": "node scripts/generate-icons.js",
+    "generate-sitemap": "node scripts/generate-sitemap.js",
+    "generate-robots": "node scripts/generate-robots.js"
+  },
   "dependencies": {
     "@sentry/react": "^7.38.0",
     "@sentry/tracing": "^7.38.0",
@@ -26,7 +40,6 @@
     "react-intersection-observer": "^9.4.3",
     "react-query": "^3.39.3",
     "react-router-dom": "^6.8.0",
-    "react-scripts": "5.0.1",
     "react-spring": "^9.7.0",
     "react-toastify": "^11.0.5",
     "react-virtualized": "^9.22.5",
@@ -43,13 +56,13 @@
     "zustand": "^4.3.0"
   },
   "devDependencies": {
-    "@craco/craco": "^7.1.0",
     "@testing-library/jest-dom": "^5.16.5",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^14.4.3",
     "@types/lodash": "^4.14.191",
     "@types/react": "^18.0.27",
     "@types/react-dom": "^18.0.10",
+    "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.23",
     "eslint": "^8.31.0",
     "eslint-plugin-react": "^7.31.11",
@@ -61,37 +74,10 @@
     "sharp": "^0.33.5",
     "sitemap": "^7.1.2",
     "tailwindcss": "^3.4.19",
-    "typescript": "^4.9.4"
-  },
-  "scripts": {
-    "start": "craco start",
-    "build": "craco build",
-    "test": "craco test",
-    "eject": "react-scripts eject",
-    "dev": "react-scripts start",
-    "lint": "eslint src/**/*.{js,jsx,ts,tsx}",
-    "lint:fix": "eslint src/**/*.{js,jsx,ts,tsx} --fix",
-    "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,scss}\"",
-    "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx,json,css,scss}\"",
-    "type-check": "tsc --noEmit",
-    "generate-icons": "node scripts/generate-icons.js",
-    "generate-sitemap": "node scripts/generate-sitemap.js",
-    "generate-robots": "node scripts/generate-robots.js"
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+    "typescript": "^4.9.4",
+    "vite": "^5.0.0"
   },
   "engines": {
-    "node": ">=16.0.0",
-    "npm": ">=8.0.0"
+    "node": "20.x"
   }
 }
