@@ -394,32 +394,37 @@ export default function App() {
         ).sort((a, b) => a.timestamp - b.timestamp);
       }, [allMessages, activeChat, account]);
 
-    useEffect(() => {
-      if (!contract || !account || !activeChat) return;
+  useEffect(() => {
+  if (!contract || !account || !activeChat) return;
 
-      const fetchHistory = async () => {
-        try {
-          const data = await contract.getMessages(
-            account,
-            activeChat.address
-          );
+  const provider = contract.runner.provider;
 
-          const formatted = data.map(msg => ({
-            sender: msg.sender,
-            receiver: msg.receiver,
-            text: msg.content,
-            timestamp: Number(msg.timestamp) * 1000,
-            pending: false
-          }));
+  const listener = async () => {
+    const data = await contract.getMessages(account, activeChat.address);
 
-          setAllMessages(formatted);
-        } catch (err) {
-          console.error("Message fetch error:", err);
-        }
-      };
+    const formatted = data.map((msg, i) => ({
+      id: i,
+      sender: msg.sender,
+      receiver: msg.receiver,
+      text: msg.content,
+      timestamp: Number(msg.timestamp) * 1000,
+      isRead: msg.isRead,
+      isBurned: msg.isBurned,
+      value: msg.value
+    }));
 
-      fetchHistory();
-    }, [contract, account, activeChat]);
+    setAllMessages(formatted);
+  };
+
+  provider.on("block", listener);
+
+  return () => {
+    provider.off("block", listener);
+  };
+
+}, [contract, account, activeChat]);
+
+
 
   // CONNECT WALLET (Debug Version)
   const connectWallet = async () => {
