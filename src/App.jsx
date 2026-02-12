@@ -424,23 +424,20 @@ const handleRegister = async () => {
     console.log("📝 Registering user with name:", registerName);
 
     // 🔒 1️⃣ PRE-CHECK: already registered?
-    const existingUser = await contract.users(account);
-    if (existingUser[1]) {
+   const existingUser = await contract.users(account);
+
+    if (existingUser.exists || existingUser[1]) {
       toast.warn("You are already registered");
       return;
     }
-
-    // ⚡ 2️⃣ Force nonce + optimized gas (mobile-safe)
-    const signer = await contract.runner.getSigner();
-    const nonce = await signer.getNonce();
-
     const tx = await contract.register(registerName.trim(), {
-      gasLimit: GAS_REGISTER,
-      nonce
+      gasLimit: GAS_REGISTER
     });
 
     toast.info("⏳ Registering on blockchain...");
     await tx.wait();
+
+    toast.success("✅ Registered successfully!");
 
     // 🔄 3️⃣ Re-validate on-chain state
     const updatedUser = await contract.users(account);
