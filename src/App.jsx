@@ -348,8 +348,12 @@ export default function App() {
         throw new Error("No accounts found");
       }
 
-      const signer = await provider.getSigner();
-      const _contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+    const signer = await provider.getSigner();
+    console.log("Contract Address Being Used:", CONTRACT_ADDRESS);
+    console.log("Starts with 0x?", CONTRACT_ADDRESS?.startsWith("0x"));
+
+    const _contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
 
       setAccount(accounts[0].toLowerCase());
       setContract(_contract);
