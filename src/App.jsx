@@ -333,9 +333,7 @@ const getAvatarGradient = (address) => {
 
 const shortenAddress = (addr) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
-// ==========================================
-// 2. COMPONENTS
-// ==========================================
+
 
 const Modal = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
@@ -352,9 +350,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
   );
 };
 
-// ==========================================
-// 3. MAIN APP
-// ==========================================
+
 
 export default function App() {
   const [account, setAccount] = useState(null);
@@ -394,35 +390,160 @@ export default function App() {
         ).sort((a, b) => a.timestamp - b.timestamp);
       }, [allMessages, activeChat, account]);
 
-  useEffect(() => {
-  if (!contract || !account || !activeChat) return;
+useEffect(() => {
+  const saved = localStorage.getItem("chainchat_contacts");
+  if (saved) {
+    try {
+      setContacts(JSON.parse(saved));
+    } catch {
+      localStorage.removeItem("chainchat_contacts");
+    }
+  }
+}, []);
 
-  const provider = contract.runner.provider;
 
-  const listener = async () => {
-    const data = await contract.getMessages(account, activeChat.address);
 
-    const formatted = data.map((msg, i) => ({
-      id: i,
-      sender: msg.sender,
-      receiver: msg.receiver,
-      text: msg.content,
-      timestamp: Number(msg.timestamp) * 1000,
-      isRead: msg.isRead,
-      isBurned: msg.isBurned,
-      value: msg.value
-    }));
+useEffect(() => {
+  localStorage.setItem("chainchat_contacts", JSON.stringify(contacts));
+}, [contacts]);
 
-    setAllMessages(formatted);
+
+
+useEffect(() => {
+  if (!contract || !account) return;
+
+  const fetchContacts = async () => {
+    try {
+      const addresses = await contract.getMyContacts?.();
+      if (!addresses) return;
+
+      const formatted = await Promise.all(
+        addresses.map(async (addr, index) => {
+          const name = await contract.getUserName(addr);
+          return {
+            id: index,
+            name: name || "Unnamed",
+            address: addr
+          };
+        })
+      );
+
+      setContacts(formatted);
+
+    } catch (err) {
+      console.error("Contact fetch error:", err);
+    }
   };
 
-  provider.on("block", listener);
+  fetchContacts();
+
+}, [contract, account]);
+
+
+
+useEffect(() => {
+  if (!contract || !account || !activeChat) return;
+
+  let interval;
+
+  const fetchMessages = async () => {
+    try {
+      const data = await contract.getMessages(
+        account,
+        activeChat.address
+      );
+
+      const formatted = data.map((msg, index) => ({
+        id: index,
+        sender: msg.sender,
+        receiver: msg.receiver,
+        text: msg.isBurned ? "[BURNED]" : msg.content,
+        timestamp: Number(msg.timestamp) * 1000,
+        isRead: msg.isRead,
+        value: msg.value,
+        isGeoLocked: msg.isGeoLocked,
+        isBurnOnRead: msg.isBurnOnRead,
+        status: "confirmed"
+      }));
+
+      setAllMessages(formatted);
+
+    } catch (err) {
+      console.error("Message fetch error:", err);
+    }
+  };
+
+  fetchMessages();
+
+  //  Poll every 4 seconds (backup)
+  interval = setInterval(fetchMessages, 4000);
+
+  return () => clearInterval(interval);
+
+}, [contract, account, activeChat]);
+
+
+
+useEffect(() => {
+  if (!contract || !account) return;
+
+  const handleNewMessage = async (
+    from,
+    to,
+    value,
+    timestamp,
+    isGeoLocked,
+    isBurnOnRead
+  ) => {
+
+    const myAddr = account.toLowerCase();
+
+    if (
+      from.toLowerCase() !== myAddr &&
+      to.toLowerCase() !== myAddr
+    ) return;
+
+    toast.info("📩 New message received");
+
+    // Refresh active chat only
+    if (activeChat) {
+      try {
+        const data = await contract.getMessages(
+          account,
+          activeChat.address
+        );
+
+        const formatted = data.map((msg, index) => ({
+          id: index,
+          sender: msg.sender,
+          receiver: msg.receiver,
+          text: msg.isBurned ? "[BURNED]" : msg.content,
+          timestamp: Number(msg.timestamp) * 1000,
+          status: "confirmed"
+        }));
+
+        setAllMessages(formatted);
+
+      } catch (err) {
+        console.error("Realtime refresh error:", err);
+      }
+    }
+  };
+
+  contract.on("MessageSent", handleNewMessage);
 
   return () => {
-    provider.off("block", listener);
+    contract.off("MessageSent", handleNewMessage);
   };
 
 }, [contract, account, activeChat]);
+
+
+
+useEffect(() => {
+  messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+}, [currentChatMessages, activeChat]);
+
 
 
 
