@@ -16,7 +16,7 @@ const CONTRACT_ADDRESS = "0xE55A801bbeb3635fe8D74d8F798E070eE6c9f960";
 
 const SEPOLIA_ID = 11155111n;
 
-// ✅ YOUR EXACT ABI (Copy-pasted from your file)
+// EXACT ABI 
 const ABI = [
 	{
 		"anonymous": false,
@@ -24,13 +24,13 @@ const ABI = [
 			{
 				"indexed": true,
 				"internalType": "address",
-				"name": "reader",
+				"name": "sender",
 				"type": "address"
 			},
 			{
 				"indexed": true,
 				"internalType": "address",
-				"name": "withUser",
+				"name": "receiver",
 				"type": "address"
 			},
 			{
@@ -38,9 +38,15 @@ const ABI = [
 				"internalType": "uint256",
 				"name": "index",
 				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "timestamp",
+				"type": "uint256"
 			}
 		],
-		"name": "MessageRead",
+		"name": "MessageBurned",
 		"type": "event"
 	},
 	{
@@ -61,14 +67,26 @@ const ABI = [
 			{
 				"indexed": false,
 				"internalType": "uint256",
-				"name": "index",
+				"name": "value",
 				"type": "uint256"
 			},
 			{
 				"indexed": false,
-				"internalType": "bytes",
-				"name": "cipherText",
-				"type": "bytes"
+				"internalType": "uint256",
+				"name": "timestamp",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "bool",
+				"name": "isGeoLocked",
+				"type": "bool"
+			},
+			{
+				"indexed": false,
+				"internalType": "bool",
+				"name": "isBurnOnRead",
+				"type": "bool"
 			}
 		],
 		"name": "MessageSent",
@@ -80,7 +98,7 @@ const ABI = [
 			{
 				"indexed": true,
 				"internalType": "address",
-				"name": "user",
+				"name": "userAddress",
 				"type": "address"
 			},
 			{
@@ -97,7 +115,7 @@ const ABI = [
 		"inputs": [
 			{
 				"internalType": "address",
-				"name": "_with",
+				"name": "_otherUser",
 				"type": "address"
 			},
 			{
@@ -106,7 +124,7 @@ const ABI = [
 				"type": "uint256"
 			}
 		],
-		"name": "markAsRead",
+		"name": "burnMessage",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -132,32 +150,57 @@ const ABI = [
 				"type": "address"
 			},
 			{
+				"internalType": "string",
+				"name": "_content",
+				"type": "string"
+			},
+			{
+				"internalType": "bool",
+				"name": "_isGeoLocked",
+				"type": "bool"
+			},
+			{
+				"internalType": "int256",
+				"name": "_geoLat",
+				"type": "int256"
+			},
+			{
+				"internalType": "int256",
+				"name": "_geoLong",
+				"type": "int256"
+			},
+			{
+				"internalType": "bool",
+				"name": "_isBurnOnRead",
+				"type": "bool"
+			},
+			{
+				"internalType": "string",
+				"name": "_imageHash",
+				"type": "string"
+			},
+			{
 				"internalType": "bytes",
-				"name": "_cipherText",
+				"name": "_signature",
 				"type": "bytes"
 			}
 		],
 		"name": "sendMessage",
 		"outputs": [],
-		"stateMutability": "nonpayable",
+		"stateMutability": "payable",
 		"type": "function"
 	},
 	{
 		"inputs": [
 			{
 				"internalType": "address",
-				"name": "_with",
+				"name": "_user1",
 				"type": "address"
 			},
 			{
-				"internalType": "uint256",
-				"name": "_start",
-				"type": "uint256"
-			},
-			{
-				"internalType": "uint256",
-				"name": "_limit",
-				"type": "uint256"
+				"internalType": "address",
+				"name": "_user2",
+				"type": "address"
 			}
 		],
 		"name": "getMessages",
@@ -166,23 +209,68 @@ const ABI = [
 				"components": [
 					{
 						"internalType": "address",
-						"name": "from",
+						"name": "sender",
 						"type": "address"
 					},
 					{
-						"internalType": "uint40",
-						"name": "timestamp",
-						"type": "uint40"
+						"internalType": "address",
+						"name": "receiver",
+						"type": "address"
 					},
 					{
-						"internalType": "bytes",
-						"name": "cipherText",
-						"type": "bytes"
+						"internalType": "string",
+						"name": "content",
+						"type": "string"
+					},
+					{
+						"internalType": "uint256",
+						"name": "timestamp",
+						"type": "uint256"
 					},
 					{
 						"internalType": "bool",
-						"name": "read",
+						"name": "isRead",
 						"type": "bool"
+					},
+					{
+						"internalType": "uint256",
+						"name": "value",
+						"type": "uint256"
+					},
+					{
+						"internalType": "bool",
+						"name": "isGeoLocked",
+						"type": "bool"
+					},
+					{
+						"internalType": "int256",
+						"name": "geoLat",
+						"type": "int256"
+					},
+					{
+						"internalType": "int256",
+						"name": "geoLong",
+						"type": "int256"
+					},
+					{
+						"internalType": "bool",
+						"name": "isBurnOnRead",
+						"type": "bool"
+					},
+					{
+						"internalType": "bool",
+						"name": "isBurned",
+						"type": "bool"
+					},
+					{
+						"internalType": "string",
+						"name": "imageHash",
+						"type": "string"
+					},
+					{
+						"internalType": "bytes",
+						"name": "signature",
+						"type": "bytes"
 					}
 				],
 				"internalType": "struct ChainChat.Message[]",
@@ -194,13 +282,19 @@ const ABI = [
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "getMyContacts",
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_user",
+				"type": "address"
+			}
+		],
+		"name": "getUserName",
 		"outputs": [
 			{
-				"internalType": "address[]",
+				"internalType": "string",
 				"name": "",
-				"type": "address[]"
+				"type": "string"
 			}
 		],
 		"stateMutability": "view",
@@ -501,66 +595,86 @@ const handleAddContact = () => {
 
   
 const sendMessage = async () => {
-    if (!messageInput.trim() || !activeChat) return;
-  
-    const textToSend = messageInput;
-    setMessageInput(""); // Clear UI
-  
-    // A. Optimistic Update (Show "Sending" immediately)
-    const tempId = Date.now();
-    const optimisticMsg = {
-      id: tempId,
-      sender: account,
-      receiver: activeChat.address,
-      text: textToSend,
-      timestamp: Date.now(),
-      status: "sending" // ⏳ Initial State
-    };
-  
-    setAllMessages(prev => [...prev, optimisticMsg]);
-  
-    try {
-      // B. Mobile Check: Gas & Registration
-      if (contract.runner?.provider) {
-        const balance = await contract.runner.provider.getBalance(account);
-        if (balance === 0n) throw new Error("INSUFFICIENT_FUNDS");
-      }
-      
-      const recipientProfile = await contract.users(activeChat.address);
-      if (!recipientProfile.exists && !recipientProfile[1]) throw new Error("RECIPIENT_NOT_REGISTERED");
-  
-      // C. Send Transaction (Mobile Fix: Force Gas, No Bytes conversion)
-      const tx = await contract.sendMessage(
-        activeChat.address,
-        textToSend, 
-        { gasLimit: 500000 } // <--- Force 500k gas for mobile
-      );
-  
-      // D. Update Status -> SENT
-      setAllMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: "sent" } : m));
-      toast.info("Sending transaction...");
-  
-      // E. Wait for Block
-      await tx.wait();
-  
-      // F. Update Status -> CONFIRMED
-      setAllMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: "confirmed" } : m));
-      toast.success("Sent!");
-      
-      // Optional: definitive reload
-      loadMessages(contract);
-  
-    } catch (err) {
-      console.error("Send Error:", err);
-      // G. Update Status -> FAILED
-      setAllMessages(prev => prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m));
-  
-      const msg = (err.reason || err.message || "").toLowerCase();
-      if (msg.includes("recipient_not_registered")) toast.error("User not registered!");
-      else if (msg.includes("insufficient_funds")) toast.error("No Gas (ETH)!");
-      else toast.error("Transaction Failed");
-    }
+  if (!messageInput.trim() || !activeChat) return;
+
+  const textToSend = messageInput;
+  setMessageInput("");
+
+  const tempId = Date.now();
+
+  const optimisticMsg = {
+    id: tempId,
+    sender: account,
+    receiver: activeChat.address,
+    text: textToSend,
+    timestamp: Date.now(),
+    status: "sending"
   };
+
+  setAllMessages(prev => [...prev, optimisticMsg]);
+
+  try {
+    // Check balance safely (ethers v6)
+    const provider = contract.runner.provider;
+    const balance = await provider.getBalance(account);
+    if (balance === 0n) throw new Error("INSUFFICIENT_FUNDS");
+
+    //  Check recipient registered
+    const recipientProfile = await contract.users(activeChat.address);
+    if (!recipientProfile.exists && !recipientProfile[1]) {
+      throw new Error("RECIPIENT_NOT_REGISTERED");
+    }
+
+    const isGeoLocked = false;
+    const geoLat = 0;
+    const geoLong = 0;
+    const isBurnOnRead = false;
+    const imageHash = "";
+    const signature = "0x";
+
+    const tx = await contract.sendMessage(
+      activeChat.address,
+      textToSend,
+      isGeoLocked,
+      geoLat,
+      geoLong,
+      isBurnOnRead,
+      imageHash,
+      signature,
+      {
+        gasLimit: 800000 // safer for complex struct
+        // value: ethers.parseEther("0.01") // optional ETH send
+      }
+    );
+
+    setAllMessages(prev =>
+      prev.map(m => m.id === tempId ? { ...m, status: "sent" } : m)
+    );
+
+    toast.info("Sending transaction...");
+    await tx.wait();
+
+    setAllMessages(prev =>
+      prev.map(m => m.id === tempId ? { ...m, status: "confirmed" } : m)
+    );
+
+    toast.success("Sent!");
+
+  } catch (err) {
+    console.error("Send Error:", err);
+
+    setAllMessages(prev =>
+      prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m)
+    );
+
+    const msg = (err.reason || err.message || "").toLowerCase();
+
+    if (msg.includes("recipient")) toast.error("Recipient not registered!");
+    else if (msg.includes("funds")) toast.error("No Gas (ETH)!");
+    else toast.error("Transaction Failed");
+  }
+};
+
 
   // AUTO SCROLL TO BOTTOM
   useEffect(() => {

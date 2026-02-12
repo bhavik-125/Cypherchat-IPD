@@ -5,6 +5,37 @@
 			{
 				"indexed": true,
 				"internalType": "address",
+				"name": "sender",
+				"type": "address"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "receiver",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "index",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "timestamp",
+				"type": "uint256"
+			}
+		],
+		"name": "MessageBurned",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
 				"name": "from",
 				"type": "address"
 			},
@@ -17,8 +48,26 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
+				"name": "value",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
 				"name": "timestamp",
 				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "bool",
+				"name": "isGeoLocked",
+				"type": "bool"
+			},
+			{
+				"indexed": false,
+				"internalType": "bool",
+				"name": "isBurnOnRead",
+				"type": "bool"
 			}
 		],
 		"name": "MessageSent",
@@ -46,12 +95,30 @@
 	{
 		"inputs": [
 			{
+				"internalType": "address",
+				"name": "_otherUser",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "_index",
+				"type": "uint256"
+			}
+		],
+		"name": "burnMessage",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
 				"internalType": "string",
 				"name": "_name",
 				"type": "string"
 			}
 		],
-		"name": "registerUser",
+		"name": "register",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -67,16 +134,57 @@
 				"internalType": "string",
 				"name": "_content",
 				"type": "string"
+			},
+			{
+				"internalType": "bool",
+				"name": "_isGeoLocked",
+				"type": "bool"
+			},
+			{
+				"internalType": "int256",
+				"name": "_geoLat",
+				"type": "int256"
+			},
+			{
+				"internalType": "int256",
+				"name": "_geoLong",
+				"type": "int256"
+			},
+			{
+				"internalType": "bool",
+				"name": "_isBurnOnRead",
+				"type": "bool"
+			},
+			{
+				"internalType": "string",
+				"name": "_imageHash",
+				"type": "string"
+			},
+			{
+				"internalType": "bytes",
+				"name": "_signature",
+				"type": "bytes"
 			}
 		],
 		"name": "sendMessage",
 		"outputs": [],
-		"stateMutability": "nonpayable",
+		"stateMutability": "payable",
 		"type": "function"
 	},
 	{
-		"inputs": [],
-		"name": "getUserMessages",
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_user1",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "_user2",
+				"type": "address"
+			}
+		],
+		"name": "getMessages",
 		"outputs": [
 			{
 				"components": [
@@ -99,9 +207,54 @@
 						"internalType": "uint256",
 						"name": "timestamp",
 						"type": "uint256"
+					},
+					{
+						"internalType": "bool",
+						"name": "isRead",
+						"type": "bool"
+					},
+					{
+						"internalType": "uint256",
+						"name": "value",
+						"type": "uint256"
+					},
+					{
+						"internalType": "bool",
+						"name": "isGeoLocked",
+						"type": "bool"
+					},
+					{
+						"internalType": "int256",
+						"name": "geoLat",
+						"type": "int256"
+					},
+					{
+						"internalType": "int256",
+						"name": "geoLong",
+						"type": "int256"
+					},
+					{
+						"internalType": "bool",
+						"name": "isBurnOnRead",
+						"type": "bool"
+					},
+					{
+						"internalType": "bool",
+						"name": "isBurned",
+						"type": "bool"
+					},
+					{
+						"internalType": "string",
+						"name": "imageHash",
+						"type": "string"
+					},
+					{
+						"internalType": "bytes",
+						"name": "signature",
+						"type": "bytes"
 					}
 				],
-				"internalType": "struct Cypherchat.Message[]",
+				"internalType": "struct ChainChat.Message[]",
 				"name": "",
 				"type": "tuple[]"
 			}
@@ -113,7 +266,7 @@
 		"inputs": [
 			{
 				"internalType": "address",
-				"name": "_userAddress",
+				"name": "_user",
 				"type": "address"
 			}
 		],
