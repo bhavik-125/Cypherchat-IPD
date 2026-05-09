@@ -1,5 +1,12 @@
 import { BrowserProvider, Contract } from "ethers";
 import ContractABI from "./contractABI.json";
+import {
+  deriveConversationKey,
+  encryptMessage as encryptWithAES,
+  decryptMessage as decryptWithAES,
+  encodeSecurePayload,
+  tryParseSecurePayload
+} from "../utils/encryption";
 
 const SEPOLIA_CHAIN_ID = 11155111;
 
@@ -96,7 +103,12 @@ class ContractService {
     try {
       if (!this.contract) await this.init();
 
-      const tx = await this.contract.sendMessage(to, content);
+      const from = await this.getConnectedAccount();
+      const conversationKey = deriveConversationKey(from, to);
+      const cipherText = encryptWithAES(content, conversationKey);
+      const secureContent = encodeSecurePayload({ cipherText, geofence: null });
+
+      const tx = await this.contract.sendMessage(to, secureContent);
       await tx.wait();
 
       return true;
@@ -112,10 +124,18 @@ class ContractService {
 
       const messages = await this.contract.getUserMessages();
 
+      const account = await this.getConnectedAccount();
       return messages.map((msg) => ({
         sender: msg.sender,
         receiver: msg.receiver,
-        content: msg.content,
+        content: (() => {
+          const payload = tryParseSecurePayload(msg.content);
+          if (!payload) return msg.content;
+
+          const conversationKey = deriveConversationKey(msg.sender, msg.receiver || account);
+          const decrypted = decryptWithAES(payload.cipherText, conversationKey);
+          return decrypted || `ENCRYPTED: ${payload.cipherText.slice(0, 28)}...`;
+        })(),
         timestamp: new Date(Number(msg.timestamp) * 1000)
       }));
     } catch (err) {

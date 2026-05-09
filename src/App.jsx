@@ -8,11 +8,19 @@ import {
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './index.css';
+import {
+  deriveConversationKey,
+  encryptMessage as encryptWithAES,
+  decryptMessage as decryptWithAES,
+  encodeSecurePayload,
+  tryParseSecurePayload,
+  isWithinGeofence
+} from './utils/encryption';
 
 // ==========================================
 // 1. CONFIGURATION
 // ==========================================
-const CONTRACT_ADDRESS = "0xE55A801bbeb3635fe8D74d8F798E070eE6c9f960"; 
+const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || "0xE55A801bbeb3635fe8D74d8F798E070eE6c9f960";
 
 const SEPOLIA_ID = 11155111n;
 
@@ -333,6 +341,103 @@ const getAvatarGradient = (address) => {
 
 const shortenAddress = (addr) => `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 
+const getContactsStorageKey = (walletAddress) =>
+  `chainchat_contacts_${(walletAddress || "guest").toLowerCase()}`;
+
+const getBurnedMessagesStorageKey = (walletAddress) =>
+  `chainchat_burned_${(walletAddress || "guest").toLowerCase()}`;
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const buildOpenStreetMapEmbedUrl = (latitude, longitude) => {
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return "https://www.openstreetmap.org/export/embed.html?bbox=-180%2C-80%2C180%2C80&layer=mapnik";
+  }
+
+  const safeLat = clamp(lat, -85, 85);
+  const safeLon = clamp(lon, -180, 180);
+  const latDelta = 0.01;
+  const lonDelta = 0.01;
+
+  const left = clamp(safeLon - lonDelta, -180, 180);
+  const right = clamp(safeLon + lonDelta, -180, 180);
+  const bottom = clamp(safeLat - latDelta, -85, 85);
+  const top = clamp(safeLat + latDelta, -85, 85);
+
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${left}%2C${bottom}%2C${right}%2C${top}&layer=mapnik&marker=${safeLat}%2C${safeLon}`;
+};
+
+const buildOpenStreetMapViewUrl = (latitude, longitude) => {
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return "https://www.openstreetmap.org/";
+  }
+
+  const safeLat = clamp(lat, -85, 85);
+  const safeLon = clamp(lon, -180, 180);
+  return `https://www.openstreetmap.org/?mlat=${safeLat}&mlon=${safeLon}#map=16/${safeLat}/${safeLon}`;
+};
+
+const readBurnedMessageKeys = (walletAddress) => {
+  const storageKey = getBurnedMessagesStorageKey(walletAddress);
+  const raw = localStorage.getItem(storageKey);
+  if (!raw) return new Set();
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((item) => typeof item === "string"));
+  } catch {
+    localStorage.removeItem(storageKey);
+    return new Set();
+  }
+};
+
+const writeBurnedMessageKeys = (walletAddress, keySet) => {
+  const storageKey = getBurnedMessagesStorageKey(walletAddress);
+  localStorage.setItem(storageKey, JSON.stringify(Array.from(keySet)));
+};
+
+const normalizeContacts = (contactList = []) =>
+  contactList
+    .filter((contact) => contact && typeof contact.address === "string")
+    .map((contact) => {
+      const normalizedAddress = contact.address.toLowerCase();
+      return {
+        id: contact.id || normalizedAddress,
+        name: (contact.name || "Unnamed").trim() || "Unnamed",
+        address: normalizedAddress
+      };
+    });
+
+const mergeContacts = (existingContacts = [], newContacts = []) => {
+  const mergedMap = new Map();
+
+  normalizeContacts(existingContacts).forEach((contact) => {
+    mergedMap.set(contact.address, contact);
+  });
+
+  normalizeContacts(newContacts).forEach((contact) => {
+    const existing = mergedMap.get(contact.address);
+    if (!existing) {
+      mergedMap.set(contact.address, contact);
+      return;
+    }
+
+    mergedMap.set(contact.address, {
+      ...existing,
+      name: contact.name !== "Unnamed" ? contact.name : existing.name
+    });
+  });
+
+  return Array.from(mergedMap.values());
+};
+
 
 
 const Modal = ({ isOpen, onClose, title, children }) => {
@@ -370,73 +475,143 @@ export default function App() {
   
   const [registerName, setRegisterName] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
+  const [geoLockEnabled, setGeoLockEnabled] = useState(false);
+  const [burnOnReadEnabled, setBurnOnReadEnabled] = useState(false);
+  const [receiverGeofence, setReceiverGeofence] = useState(null);
+  const [geoRadiusMeters, setGeoRadiusMeters] = useState("100");
+  const [isGeoProcessing, setIsGeoProcessing] = useState(false);
+  const [viewerLocation, setViewerLocation] = useState(null);
+  const [isLocationRefreshing, setIsLocationRefreshing] = useState(false);
 
   const messagesEndRef = useRef(null);
-    //pooling
-      useEffect(() => {
-        const saved = localStorage.getItem('chainchat_contacts');
-        if (saved) setContacts(JSON.parse(saved));
-      }, []);
+  const burnTimersRef = useRef(new Map());
+  const burnedMessageKeysRef = useRef(new Set());
 
-      // Filter messages for current chat
+      // Filter messages for current chat and decrypt AES payload when allowed
       const currentChatMessages = useMemo(() => {
         if (!activeChat || !account) return [];
         const activeAddr = activeChat.address.toLowerCase();
         const myAddr = account.toLowerCase();
 
-        return allMessages.filter(msg => 
-          (msg.sender.toLowerCase() === myAddr && msg.receiver.toLowerCase() === activeAddr) ||
-          (msg.sender.toLowerCase() === activeAddr && msg.receiver.toLowerCase() === myAddr)
-        ).sort((a, b) => a.timestamp - b.timestamp);
-      }, [allMessages, activeChat, account]);
+        return allMessages
+          .filter((msg) =>
+            (msg.sender.toLowerCase() === myAddr && msg.receiver.toLowerCase() === activeAddr) ||
+            (msg.sender.toLowerCase() === activeAddr && msg.receiver.toLowerCase() === myAddr)
+          )
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .map((msg) => {
+            if (msg.isBurned) {
+              return {
+                ...msg,
+                displayText: "[BURNED]"
+              };
+            }
+
+            const securePayload = tryParseSecurePayload(msg.text);
+            if (!securePayload) {
+              return { ...msg, displayText: msg.text };
+            }
+
+            const conversationKey = deriveConversationKey(msg.sender, msg.receiver);
+            const geofence = securePayload.geofence || null;
+            const isReceiver = msg.receiver.toLowerCase() === myAddr;
+            const locationAllowed = !isReceiver || !geofence || isWithinGeofence(viewerLocation, geofence);
+
+            if (!locationAllowed) {
+              return {
+                ...msg,
+                isGeoLocked: true,
+                displayText: `ENCRYPTED: ${securePayload.cipherText.slice(0, 28)}...`,
+                geoBlocked: true
+              };
+            }
+
+            const decryptedText = decryptWithAES(securePayload.cipherText, conversationKey);
+            if (!decryptedText) {
+              return {
+                ...msg,
+                displayText: `ENCRYPTED: ${securePayload.cipherText.slice(0, 28)}...`
+              };
+            }
+
+            return {
+              ...msg,
+              isGeoLocked: Boolean(geofence),
+              displayText: decryptedText,
+              geoBlocked: false
+            };
+          });
+      }, [allMessages, activeChat, account, viewerLocation]);
 
 useEffect(() => {
-  const saved = localStorage.getItem("chainchat_contacts");
-  if (saved) {
+  if (!account) {
+    setContacts([]);
+    setActiveChat(null);
+    return;
+  }
+
+  const storageKey = getContactsStorageKey(account);
+  const saved = localStorage.getItem(storageKey);
+  const legacySaved = localStorage.getItem("chainchat_contacts");
+
+  if (!saved && legacySaved) {
     try {
-      setContacts(JSON.parse(saved));
+      const migratedContacts = normalizeContacts(JSON.parse(legacySaved));
+      setContacts(migratedContacts);
+      localStorage.setItem(storageKey, JSON.stringify(migratedContacts));
+      localStorage.removeItem("chainchat_contacts");
+      return;
     } catch {
       localStorage.removeItem("chainchat_contacts");
     }
   }
-}, []);
 
+  if (!saved) {
+    setContacts([]);
+    return;
+  }
 
+  try {
+    setContacts(normalizeContacts(JSON.parse(saved)));
+  } catch {
+    localStorage.removeItem(storageKey);
+    setContacts([]);
+  }
+}, [account]);
 
 useEffect(() => {
-  localStorage.setItem("chainchat_contacts", JSON.stringify(contacts));
-}, [contacts]);
-
-
+  if (!account) return;
+  const storageKey = getContactsStorageKey(account);
+  localStorage.setItem(storageKey, JSON.stringify(normalizeContacts(contacts)));
+}, [account, contacts]);
 
 useEffect(() => {
-  if (!contract || !account) return;
+  if (!contract || !account || typeof contract.getMyContacts !== "function") return;
 
   const fetchContacts = async () => {
     try {
-      const addresses = await contract.getMyContacts?.();
-      if (!addresses) return;
+      const addresses = await contract.getMyContacts();
+      if (!Array.isArray(addresses) || addresses.length === 0) return;
 
       const formatted = await Promise.all(
-        addresses.map(async (addr, index) => {
+        addresses.map(async (addr) => {
+          const normalizedAddress = addr.toLowerCase();
           const name = await contract.getUserName(addr);
           return {
-            id: index,
+            id: normalizedAddress,
             name: name || "Unnamed",
-            address: addr
+            address: normalizedAddress
           };
         })
       );
 
-      setContacts(formatted);
-
+      setContacts((prev) => mergeContacts(prev, formatted));
     } catch (err) {
       console.error("Contact fetch error:", err);
     }
   };
 
   fetchContacts();
-
 }, [contract, account]);
 
 
@@ -453,18 +628,24 @@ useEffect(() => {
         activeChat.address
       );
 
-      const formatted = data.map((msg, index) => ({
-        id: index,
-        sender: msg.sender,
-        receiver: msg.receiver,
-        text: msg.isBurned ? "[BURNED]" : msg.content,
-        timestamp: Number(msg.timestamp) * 1000,
-        isRead: msg.isRead,
-        value: msg.value,
-        isGeoLocked: msg.isGeoLocked,
-        isBurnOnRead: msg.isBurnOnRead,
-        status: "confirmed"
-      }));
+      const formatted = data.map((msg, index) => {
+        const burnKey = `${activeChat.address.toLowerCase()}::${index}`;
+        const isBurned = Boolean(msg.isBurned || burnedMessageKeysRef.current.has(burnKey));
+
+        return {
+          id: index,
+          sender: msg.sender,
+          receiver: msg.receiver,
+          text: isBurned ? "[BURNED]" : msg.content,
+          timestamp: Number(msg.timestamp) * 1000,
+          isRead: msg.isRead,
+          value: msg.value,
+          isGeoLocked: msg.isGeoLocked,
+          isBurnOnRead: msg.isBurnOnRead,
+          isBurned,
+          status: "confirmed"
+        };
+      });
 
       setAllMessages(formatted);
 
@@ -513,14 +694,24 @@ useEffect(() => {
           activeChat.address
         );
 
-        const formatted = data.map((msg, index) => ({
-          id: index,
-          sender: msg.sender,
-          receiver: msg.receiver,
-          text: msg.isBurned ? "[BURNED]" : msg.content,
-          timestamp: Number(msg.timestamp) * 1000,
-          status: "confirmed"
-        }));
+        const formatted = data.map((msg, index) => {
+          const burnKey = `${activeChat.address.toLowerCase()}::${index}`;
+          const isBurned = Boolean(msg.isBurned || burnedMessageKeysRef.current.has(burnKey));
+
+          return {
+            id: index,
+            sender: msg.sender,
+            receiver: msg.receiver,
+            text: isBurned ? "[BURNED]" : msg.content,
+            timestamp: Number(msg.timestamp) * 1000,
+            isRead: msg.isRead,
+            value: msg.value,
+            isGeoLocked: msg.isGeoLocked,
+            isBurnOnRead: msg.isBurnOnRead,
+            isBurned,
+            status: "confirmed"
+          };
+        });
 
         setAllMessages(formatted);
 
@@ -530,23 +721,56 @@ useEffect(() => {
     }
   };
 
+  const handleMessageBurned = async (sender, receiver) => {
+    if (!activeChat) return;
+
+    const myAddr = account.toLowerCase();
+    const activeAddr = activeChat.address.toLowerCase();
+    const senderAddr = sender.toLowerCase();
+    const receiverAddr = receiver.toLowerCase();
+
+    const isRelevantConversation =
+      (senderAddr === myAddr && receiverAddr === activeAddr) ||
+      (senderAddr === activeAddr && receiverAddr === myAddr);
+
+    if (!isRelevantConversation) return;
+
+    try {
+      const data = await contract.getMessages(account, activeChat.address);
+      const formatted = data.map((msg, index) => {
+        const burnKey = `${activeChat.address.toLowerCase()}::${index}`;
+        const isBurned = Boolean(msg.isBurned || burnedMessageKeysRef.current.has(burnKey));
+
+        return {
+          id: index,
+          sender: msg.sender,
+          receiver: msg.receiver,
+          text: isBurned ? "[BURNED]" : msg.content,
+          timestamp: Number(msg.timestamp) * 1000,
+          isRead: msg.isRead,
+          value: msg.value,
+          isGeoLocked: msg.isGeoLocked,
+          isBurnOnRead: msg.isBurnOnRead,
+          isBurned,
+          status: "confirmed"
+        };
+      });
+
+      setAllMessages(formatted);
+    } catch (err) {
+      console.error("Realtime burn refresh error:", err);
+    }
+  };
+
   contract.on("MessageSent", handleNewMessage);
+  contract.on("MessageBurned", handleMessageBurned);
 
   return () => {
     contract.off("MessageSent", handleNewMessage);
+    contract.off("MessageBurned", handleMessageBurned);
   };
 
 }, [contract, account, activeChat]);
-
-
-
-useEffect(() => {
-  messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-}, [currentChatMessages, activeChat]);
-
-
-
-
   // CONNECT WALLET (Debug Version)
   const connectWallet = async () => {
     // 1. Check if Wallet is installed
@@ -697,19 +921,41 @@ const handleAddContact = () => {
     return;
   }
 
-  if (!newContactAddress.startsWith("0x")) {
+  const rawAddress = newContactAddress.trim();
+
+  if (!rawAddress.toLowerCase().startsWith("0x")) {
     toast.error("Invalid address format");
     return;
   }
 
-  // Example: Add to local state (you probably have contacts state)
-  setContacts(prev => [
-    ...prev,
-    {
-      name: newContactName.trim(),
-      address: newContactAddress.trim()
+  const normalizedAddress = rawAddress.toLowerCase();
+  const normalizedName = newContactName.trim();
+
+  setContacts((prev) => {
+    const existingIndex = prev.findIndex(
+      (contact) => contact.address?.toLowerCase() === normalizedAddress
+    );
+
+    if (existingIndex >= 0) {
+      const updated = [...prev];
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        id: updated[existingIndex].id || normalizedAddress,
+        name: normalizedName,
+        address: normalizedAddress
+      };
+      return updated;
     }
-  ]);
+
+    return [
+      ...prev,
+      {
+        id: normalizedAddress,
+        name: normalizedName,
+        address: normalizedAddress
+      }
+    ];
+  });
 
   toast.success("Contact added!");
 
@@ -718,30 +964,118 @@ const handleAddContact = () => {
   setIsAddContactOpen(false);
 };
 
+const getCurrentPosition = () =>
+  new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("Geolocation is not available on this device."));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve(position),
+      (error) => reject(new Error(error.message || "Unable to access location.")),
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
+  });
+
+const setReceiverGeofenceFromCurrentLocation = async () => {
+  try {
+    setIsLocationRefreshing(true);
+    const position = await getCurrentPosition();
+    setReceiverGeofence({
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude
+    });
+    toast.success("Receiver geofence set to your current location.");
+  } catch (error) {
+    toast.error(error.message || "Unable to set receiver geofence.");
+  } finally {
+    setIsLocationRefreshing(false);
+  }
+};
+
+const refreshViewerLocation = async () => {
+  try {
+    setIsLocationRefreshing(true);
+    const position = await getCurrentPosition();
+    setViewerLocation({
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy
+    });
+  } catch (error) {
+    toast.error(error.message || "Unable to refresh location for decryption.");
+  } finally {
+    setIsLocationRefreshing(false);
+  }
+};
+
+const parsePositiveNumber = (value, label) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${label} must be greater than zero.`);
+  }
+  return parsed;
+};
+
+const toSolidityGeoValue = (decimalCoordinate) => Math.round(decimalCoordinate * 1_000_000);
+
 
   
 const sendMessage = async () => {
-  if (!messageInput.trim() || !activeChat) return;
+  if (!messageInput.trim() || !activeChat || !contract || !account) return;
 
-  const textToSend = messageInput;
-  setMessageInput("");
-
-  const tempId = Date.now();
-
-  const optimisticMsg = {
-    id: tempId,
-    sender: account,
-    receiver: activeChat.address,
-    text: textToSend,
-    timestamp: Date.now(),
-    status: "sending"
-  };
-
-  setAllMessages(prev => [...prev, optimisticMsg]);
+  const textToSend = messageInput.trim();
+  let tempId = null;
 
   try {
+    let isGeoLocked = false;
+    let geoLat = 0;
+    let geoLong = 0;
+    const isBurnOnRead = burnOnReadEnabled;
+    const imageHash = "";
+    const signature = "0x";
+    let secureContent = textToSend;
+
+    if (geoLockEnabled) {
+      setIsGeoProcessing(true);
+      if (!receiverGeofence) {
+        throw new Error("Set receiver geofence location before sending.");
+      }
+
+      const targetLat = Number(receiverGeofence.latitude);
+      const targetLng = Number(receiverGeofence.longitude);
+
+      if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) {
+        throw new Error("Receiver geofence location is invalid.");
+      }
+
+      isGeoLocked = true;
+      geoLat = toSolidityGeoValue(targetLat);
+      geoLong = toSolidityGeoValue(targetLng);
+    }
+
+    const conversationKey = deriveConversationKey(account, activeChat.address);
+    const cipherText = encryptWithAES(textToSend, conversationKey);
+    const geofencePayload = isGeoLocked
+      ? {
+          latitude: Number(receiverGeofence.latitude),
+          longitude: Number(receiverGeofence.longitude),
+          radiusMeters: parsePositiveNumber(geoRadiusMeters, "Radius")
+        }
+      : null;
+    secureContent = encodeSecurePayload({
+      cipherText,
+      geofence: geofencePayload
+    });
+
     // Check balance safely (ethers v6)
-    const provider = contract.runner.provider;
+    const provider = contract.runner?.provider;
+    if (!provider) throw new Error("Provider unavailable");
     const balance = await provider.getBalance(account);
     if (balance === 0n) throw new Error("INSUFFICIENT_FUNDS");
 
@@ -751,16 +1085,24 @@ const sendMessage = async () => {
       throw new Error("RECIPIENT_NOT_REGISTERED");
     }
 
-    const isGeoLocked = false;
-    const geoLat = 0;
-    const geoLong = 0;
-    const isBurnOnRead = false;
-    const imageHash = "";
-    const signature = "0x";
+    setMessageInput("");
+    tempId = Date.now();
+    const optimisticMsg = {
+      id: tempId,
+      sender: account,
+      receiver: activeChat.address,
+      text: secureContent,
+      timestamp: Date.now(),
+      status: "sending",
+      isGeoLocked,
+      isBurnOnRead,
+      isBurned: false
+    };
+    setAllMessages(prev => [...prev, optimisticMsg]);
 
     const tx = await contract.sendMessage(
       activeChat.address,
-      textToSend,
+      secureContent,
       isGeoLocked,
       geoLat,
       geoLong,
@@ -789,17 +1131,109 @@ const sendMessage = async () => {
   } catch (err) {
     console.error("Send Error:", err);
 
-    setAllMessages(prev =>
-      prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m)
-    );
+    if (tempId) {
+      setAllMessages(prev =>
+        prev.map(m => m.id === tempId ? { ...m, status: "failed" } : m)
+      );
+    }
 
     const msg = (err.reason || err.message || "").toLowerCase();
 
     if (msg.includes("recipient")) toast.error("Recipient not registered!");
     else if (msg.includes("funds")) toast.error("No Gas (ETH)!");
+    else if (
+      msg.includes("geo") ||
+      msg.includes("location") ||
+      msg.includes("latitude") ||
+      msg.includes("longitude") ||
+      msg.includes("receiver geofence")
+    ) {
+      toast.error(err.reason || err.message || "Geofence validation failed.");
+    }
     else toast.error("Transaction Failed");
+  } finally {
+    setIsGeoProcessing(false);
   }
 };
+
+useEffect(() => {
+  if (!activeChat || !account) return;
+  refreshViewerLocation();
+}, [activeChat, account]);
+
+useEffect(() => {
+  if (!contract || !account || !activeChat) return;
+
+  const myAddress = account.toLowerCase();
+  const activeAddress = activeChat.address.toLowerCase();
+
+  currentChatMessages.forEach((msg) => {
+    const isReceiver = msg.receiver?.toLowerCase() === myAddress;
+    const messageIndex = Number(msg.id);
+    const burnKey = `${activeAddress}::${messageIndex}`;
+
+    if (msg.isBurned) {
+      const pendingTimer = burnTimersRef.current.get(burnKey);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        burnTimersRef.current.delete(burnKey);
+      }
+      burnedMessageKeysRef.current.add(burnKey);
+      writeBurnedMessageKeys(account, burnedMessageKeysRef.current);
+      return;
+    }
+
+    if (!isReceiver || msg.status !== "confirmed" || !msg.isBurnOnRead || msg.geoBlocked) return;
+    if (!Number.isInteger(messageIndex) || messageIndex < 0) return;
+    if (burnTimersRef.current.has(burnKey) || burnedMessageKeysRef.current.has(burnKey)) return;
+
+    const timeoutId = setTimeout(async () => {
+      burnTimersRef.current.delete(burnKey);
+      burnedMessageKeysRef.current.add(burnKey);
+      writeBurnedMessageKeys(account, burnedMessageKeysRef.current);
+
+      // Optimistically hide plaintext as soon as burn timer completes.
+      setAllMessages((prev) =>
+        prev.map((item) =>
+          Number(item.id) === messageIndex
+            ? {
+                ...item,
+                isBurned: true,
+                text: "[BURNED]"
+              }
+            : item
+        )
+      );
+
+      try {
+        const tx = await contract.burnMessage(activeChat.address, messageIndex, {
+          gasLimit: 300000
+        });
+        await tx.wait();
+      } catch (error) {
+        console.error("Burn on read transaction failed:", error);
+      }
+    }, 2000);
+
+    burnTimersRef.current.set(burnKey, timeoutId);
+  });
+}, [contract, account, activeChat, currentChatMessages]);
+
+useEffect(() => {
+  return () => {
+    burnTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+    burnTimersRef.current.clear();
+  };
+}, []);
+
+useEffect(() => {
+  if (!account) {
+    burnedMessageKeysRef.current.clear();
+    return;
+  }
+
+  burnedMessageKeysRef.current = readBurnedMessageKeys(account);
+}, [account]);
 
 
   // AUTO SCROLL TO BOTTOM
@@ -861,7 +1295,7 @@ const sendMessage = async () => {
 
         <div className="flex-1 overflow-y-auto custom-scrollbar">
           {contacts.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase())).map(contact => (
-            <div key={contact.id} onClick={() => setActiveChat(contact)} className={`px-4 py-3 cursor-pointer border-l-2 hover:bg-dark-700/50 ${activeChat?.id === contact.id ? 'bg-dark-700/80 border-brand-500' : 'border-transparent'}`}>
+            <div key={contact.address} onClick={() => setActiveChat(contact)} className={`px-4 py-3 cursor-pointer border-l-2 hover:bg-dark-700/50 ${activeChat?.address?.toLowerCase() === contact.address?.toLowerCase() ? 'bg-dark-700/80 border-brand-500' : 'border-transparent'}`}>
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-md" style={{ background: getAvatarGradient(contact.address) }}>{contact.name[0]}</div>
                 <div><h3 className="font-semibold text-sm">{contact.name}</h3><p className="text-xs text-gray-500 font-mono">{shortenAddress(contact.address)}</p></div>
@@ -909,7 +1343,15 @@ const sendMessage = async () => {
                         ${msg.status === 'failed' ? 'border border-red-500' : ''}
                       `}
                     >
-                      <p>{msg.text}</p>
+                      <p className={msg.geoBlocked ? 'font-mono text-yellow-200 break-all' : ''}>
+                        {msg.displayText ?? msg.text}
+                      </p>
+                      {(msg.isGeoLocked || msg.isBurnOnRead) && (
+                        <div className="flex flex-wrap gap-1 mt-2 text-[10px]">
+                          {msg.isGeoLocked && <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200">Geo Locked</span>}
+                          {msg.isBurnOnRead && <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200">Burn on Read</span>}
+                        </div>
+                      )}
 
                       <div className="flex justify-end items-center gap-1 mt-1 text-[10px] opacity-70">
                         {format(new Date(msg.timestamp), 'hh:mm a')}
@@ -932,9 +1374,99 @@ const sendMessage = async () => {
             </div>
 
             <div className="p-4 bg-dark-900 border-t border-dark-700">
-              <div className="max-w-4xl mx-auto flex gap-3">
-                <input type="text" value={messageInput} onChange={e => setMessageInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Type a message..." className="flex-1 bg-dark-800 border border-dark-700 rounded-full px-5 py-3 focus:border-brand-500 outline-none text-white"/>
-                <button onClick={sendMessage} className="bg-brand-600 hover:bg-brand-500 text-white p-3 rounded-full"><Send size={20}/></button>
+              <div className="max-w-4xl mx-auto space-y-3">
+                <div className="flex flex-wrap gap-3 text-xs text-gray-300">
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={geoLockEnabled}
+                      onChange={(e) => setGeoLockEnabled(e.target.checked)}
+                      className="accent-brand-500"
+                    />
+                    Geo-lock message
+                  </label>
+                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={burnOnReadEnabled}
+                      onChange={(e) => setBurnOnReadEnabled(e.target.checked)}
+                      className="accent-brand-500"
+                    />
+                    Burn on read
+                  </label>
+                </div>
+
+                {geoLockEnabled && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={setReceiverGeofenceFromCurrentLocation}
+                        className="bg-dark-800 hover:bg-dark-700 border border-dark-700 rounded-xl px-3 py-2 text-sm"
+                      >
+                        {isLocationRefreshing ? "Setting geofence..." : "Set Receiver Geofence to My Current Location"}
+                      </button>
+                      <input
+                        type="number"
+                        min="1"
+                        value={geoRadiusMeters}
+                        onChange={(e) => setGeoRadiusMeters(e.target.value)}
+                        placeholder="Radius (m)"
+                        className="bg-dark-800 border border-dark-700 rounded-xl px-3 py-2 text-sm focus:border-brand-500 outline-none"
+                      />
+                      <div className="bg-dark-800 border border-dark-700 rounded-xl px-3 py-2 text-xs text-gray-300">
+                        {receiverGeofence
+                          ? `Target: ${receiverGeofence.latitude.toFixed(6)}, ${receiverGeofence.longitude.toFixed(6)}`
+                          : "Geofence target not set"}
+                      </div>
+                    </div>
+
+                    {receiverGeofence && (
+                      <div className="space-y-2">
+                        <div className="rounded-xl overflow-hidden border border-dark-700 bg-dark-800">
+                          <iframe
+                            title="Receiver geofence map preview"
+                            src={buildOpenStreetMapEmbedUrl(
+                              receiverGeofence.latitude,
+                              receiverGeofence.longitude
+                            )}
+                            className="w-full h-56 border-0"
+                            loading="lazy"
+                            referrerPolicy="no-referrer-when-downgrade"
+                          />
+                        </div>
+                        <a
+                          href={buildOpenStreetMapViewUrl(
+                            receiverGeofence.latitude,
+                            receiverGeofence.longitude
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-block text-xs text-brand-400 hover:text-brand-300"
+                        >
+                          Open full map view
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex justify-start">
+                  <button
+                    type="button"
+                    onClick={refreshViewerLocation}
+                    className="bg-dark-800 hover:bg-dark-700 border border-dark-700 rounded-xl px-3 py-2 text-xs text-gray-300"
+                  >
+                    {isLocationRefreshing ? "Refreshing location..." : "Refresh My Location for Decryption"}
+                  </button>
+                </div>
+
+                <div className="flex gap-3">
+                  <input type="text" value={messageInput} onChange={e => setMessageInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Type a message..." className="flex-1 bg-dark-800 border border-dark-700 rounded-full px-5 py-3 focus:border-brand-500 outline-none text-white"/>
+                  <button onClick={sendMessage} disabled={isGeoProcessing || (geoLockEnabled && !receiverGeofence)} className="bg-brand-600 hover:bg-brand-500 disabled:opacity-60 disabled:cursor-not-allowed text-white p-3 rounded-full">
+                    {isGeoProcessing ? <Loader2 size={20} className="animate-spin" /> : <Send size={20}/>}
+                  </button>
+                </div>
               </div>
             </div>
           </>

@@ -147,16 +147,52 @@ Message contents are never stored on-chain, ensuring privacy and minimizing gas 
 git clone https://github.com/bhavik-125/Cypherchat-IPD.git
 cd Cypherchat-IPD
 npm install
+npm run dev:backend
 npm run dev
 </pre>
 
 <p><strong>Environment Configuration</strong></p>
 
 <pre>
-REACT_APP_CONTRACT_ADDRESS=0xYourContractAddress
-REACT_APP_RPC_URL=YourRPCURL
-REACT_APP_CHAIN_ID=11155111
+VITE_CONTRACT_ADDRESS=0xYourContractAddress
+VITE_API_BASE_URL=http://localhost:4000/api
+
+# Backend server
+PORT=4000
+CORS_ORIGIN=http://localhost:5173
 </pre>
+
+---
+
+## Backend Services
+
+<ul>
+  <li><code>POST /api/geofencing/request-nonce</code> — returns one-time nonce for device challenge</li>
+  <li><code>POST /api/geofencing/evaluate</code> — validates cryptographic telemetry and geofence confidence</li>
+  <li><code>POST /api/graph/process</code> — transforms interaction logs into graph nodes/edges</li>
+  <li><code>GET /api/health</code> — health check endpoint</li>
+</ul>
+
+<p>
+For production deployment:
+</p>
+
+<pre>
+npm run build
+npm run start
+</pre>
+
+---
+
+## Deploy (Vercel + Render)
+
+<ol>
+  <li>Deploy backend from this repo on Render using <code>render.yaml</code> (or Build: <code>npm install</code>, Start: <code>npm run start</code>)</li>
+  <li>Set Render env var <code>CORS_ORIGIN</code> to your Vercel frontend URL (comma-separated if multiple domains)</li>
+  <li>Deploy frontend on Vercel using <code>vercel.json</code></li>
+  <li>Set Vercel env var <code>VITE_API_BASE_URL</code> to <code>https://&lt;your-render-service&gt;.onrender.com/api</code></li>
+  <li>Set Vercel env var <code>VITE_CONTRACT_ADDRESS</code> to your deployed contract address</li>
+</ol>
 
 ---
 
@@ -165,8 +201,8 @@ REACT_APP_CHAIN_ID=11155111
 <ol>
   <li>Connect MetaMask wallet</li>
   <li>Enter recipient wallet address</li>
-  <li>Compose and send encrypted message</li>
-  <li>Messages are encrypted locally and verified via blockchain</li>
+  <li>Compose a message and optionally enable <strong>Geo-lock message</strong>; use <strong>Set Receiver Geofence to My Current Location</strong> to define the unlock location and verify it with the embedded OpenStreetMap preview</li>
+  <li>Messages are stored AES-encrypted on-chain and decrypt only when the receiver is within the geofence radius; otherwise encrypted text remains visible</li>
 </ol>
 
 ---
@@ -175,15 +211,18 @@ REACT_APP_CHAIN_ID=11155111
 
 <pre>
 Cypherchat-IPD/
+├── backend/
+│   ├── services/
+│   ├── utils/
+│   └── server.js
 ├── src/
 │   ├── components/
 │   ├── blockchain/
 │   ├── hooks/
 │   ├── utils/
+│   ├── services/
 │   └── App.jsx
-├── contracts/
 ├── public/
-├── .env
 ├── package.json
 └── README.md
 </pre>
