@@ -16,6 +16,7 @@ import {
   tryParseSecurePayload,
   isWithinGeofence
 } from './utils/encryption';
+import { vmBakHash } from './utils/vm-bak-hash';
 
 // ==========================================
 // 1. CONFIGURATION
@@ -403,6 +404,11 @@ const writeBurnedMessageKeys = (walletAddress, keySet) => {
   localStorage.setItem(storageKey, JSON.stringify(Array.from(keySet)));
 };
 
+const extractVmBakHash = (rawContent) => {
+  const payload = tryParseSecurePayload(rawContent);
+  return payload && typeof payload.vmBakHash === "string" ? payload.vmBakHash : null;
+};
+
 const normalizeContacts = (contactList = []) =>
   contactList
     .filter((contact) => contact && typeof contact.address === "string")
@@ -503,16 +509,23 @@ export default function App() {
             if (msg.isBurned) {
               return {
                 ...msg,
-                displayText: "[BURNED]"
+                displayText: "[BURNED]",
+                displayHash: msg.vmBakHash || null
               };
             }
 
             const securePayload = tryParseSecurePayload(msg.text);
+            const conversationKey = deriveConversationKey(msg.sender, msg.receiver);
+            const payloadHash =
+              securePayload && typeof securePayload.vmBakHash === "string"
+                ? securePayload.vmBakHash
+                : msg.vmBakHash || null;
+
             if (!securePayload) {
-              return { ...msg, displayText: msg.text };
+              const fallbackHash = vmBakHash(msg.text, conversationKey);
+              return { ...msg, displayText: msg.text, displayHash: payloadHash || fallbackHash };
             }
 
-            const conversationKey = deriveConversationKey(msg.sender, msg.receiver);
             const geofence = securePayload.geofence || null;
             const isReceiver = msg.receiver.toLowerCase() === myAddr;
             const locationAllowed = !isReceiver || !geofence || isWithinGeofence(viewerLocation, geofence);
@@ -522,6 +535,7 @@ export default function App() {
                 ...msg,
                 isGeoLocked: true,
                 displayText: `ENCRYPTED: ${securePayload.cipherText.slice(0, 28)}...`,
+                displayHash: payloadHash,
                 geoBlocked: true
               };
             }
@@ -530,14 +544,20 @@ export default function App() {
             if (!decryptedText) {
               return {
                 ...msg,
-                displayText: `ENCRYPTED: ${securePayload.cipherText.slice(0, 28)}...`
+                displayText: `ENCRYPTED: ${securePayload.cipherText.slice(0, 28)}...`,
+                displayHash: payloadHash
               };
             }
+
+            const computedHash = vmBakHash(decryptedText, conversationKey);
+            const displayHash = payloadHash || computedHash;
 
             return {
               ...msg,
               isGeoLocked: Boolean(geofence),
               displayText: decryptedText,
+              displayHash,
+              hashMismatch: Boolean(payloadHash && payloadHash !== computedHash),
               geoBlocked: false
             };
           });
@@ -637,6 +657,7 @@ useEffect(() => {
           sender: msg.sender,
           receiver: msg.receiver,
           text: isBurned ? "[BURNED]" : msg.content,
+          vmBakHash: extractVmBakHash(msg.content),
           timestamp: Number(msg.timestamp) * 1000,
           isRead: msg.isRead,
           value: msg.value,
@@ -703,6 +724,7 @@ useEffect(() => {
             sender: msg.sender,
             receiver: msg.receiver,
             text: isBurned ? "[BURNED]" : msg.content,
+            vmBakHash: extractVmBakHash(msg.content),
             timestamp: Number(msg.timestamp) * 1000,
             isRead: msg.isRead,
             value: msg.value,
@@ -746,6 +768,7 @@ useEffect(() => {
           sender: msg.sender,
           receiver: msg.receiver,
           text: isBurned ? "[BURNED]" : msg.content,
+          vmBakHash: extractVmBakHash(msg.content),
           timestamp: Number(msg.timestamp) * 1000,
           isRead: msg.isRead,
           value: msg.value,
@@ -1060,6 +1083,7 @@ const sendMessage = async () => {
     }
 
     const conversationKey = deriveConversationKey(account, activeChat.address);
+    const vmBakMessageHash = vmBakHash(textToSend, conversationKey);
     const cipherText = encryptWithAES(textToSend, conversationKey);
     const geofencePayload = isGeoLocked
       ? {
@@ -1070,7 +1094,8 @@ const sendMessage = async () => {
       : null;
     secureContent = encodeSecurePayload({
       cipherText,
-      geofence: geofencePayload
+      geofence: geofencePayload,
+      vmBakHash: vmBakMessageHash
     });
 
     // Check balance safely (ethers v6)
@@ -1092,6 +1117,7 @@ const sendMessage = async () => {
       sender: account,
       receiver: activeChat.address,
       text: secureContent,
+      vmBakHash: vmBakMessageHash,
       timestamp: Date.now(),
       status: "sending",
       isGeoLocked,
@@ -1350,6 +1376,16 @@ useEffect(() => {
                         <div className="flex flex-wrap gap-1 mt-2 text-[10px]">
                           {msg.isGeoLocked && <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-200">Geo Locked</span>}
                           {msg.isBurnOnRead && <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-200">Burn on Read</span>}
+                        </div>
+                      )}
+                      {msg.displayHash && (
+                        <div className="mt-2 text-[10px] font-mono text-cyan-300 break-all">
+                          VM_BAK: {msg.displayHash}
+                        </div>
+                      )}
+                      {msg.hashMismatch && (
+                        <div className="mt-1 text-[10px] text-red-300">
+                          VM_BAK mismatch detected
                         </div>
                       )}
 

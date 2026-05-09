@@ -203,6 +203,7 @@ npm run start
   <li>Enter recipient wallet address</li>
   <li>Compose a message and optionally enable <strong>Geo-lock message</strong>; use <strong>Set Receiver Geofence to My Current Location</strong> to define the unlock location and verify it with the embedded OpenStreetMap preview</li>
   <li>Messages are stored AES-encrypted on-chain and decrypt only when the receiver is within the geofence radius; otherwise encrypted text remains visible</li>
+  <li>Each message displays a deterministic <strong>VM_BAK</strong> hash on sender and receiver so both sides see the same hash value</li>
 </ol>
 
 ---

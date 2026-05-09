@@ -7,6 +7,7 @@ import {
   encodeSecurePayload,
   tryParseSecurePayload
 } from "../utils/encryption";
+import { vmBakHash } from "../utils/vm-bak-hash";
 
 const SEPOLIA_CHAIN_ID = 11155111;
 
@@ -105,8 +106,13 @@ class ContractService {
 
       const from = await this.getConnectedAccount();
       const conversationKey = deriveConversationKey(from, to);
+      const vmBakMessageHash = vmBakHash(content, conversationKey);
       const cipherText = encryptWithAES(content, conversationKey);
-      const secureContent = encodeSecurePayload({ cipherText, geofence: null });
+      const secureContent = encodeSecurePayload({
+        cipherText,
+        geofence: null,
+        vmBakHash: vmBakMessageHash
+      });
 
       const tx = await this.contract.sendMessage(to, secureContent);
       await tx.wait();
@@ -128,6 +134,10 @@ class ContractService {
       return messages.map((msg) => ({
         sender: msg.sender,
         receiver: msg.receiver,
+        hash: (() => {
+          const payload = tryParseSecurePayload(msg.content);
+          return payload?.vmBakHash || null;
+        })(),
         content: (() => {
           const payload = tryParseSecurePayload(msg.content);
           if (!payload) return msg.content;

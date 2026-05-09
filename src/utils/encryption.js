@@ -65,12 +65,14 @@ export const generateKeyPair = async () => {
 
 export const encodeSecurePayload = ({
   cipherText,
-  geofence
+  geofence,
+  vmBakHash
 }) => {
   const payload = {
     v: 1,
     alg: 'AES',
     cipherText,
+    vmBakHash: typeof vmBakHash === 'string' ? vmBakHash : null,
     geofence: geofence
       ? {
           latitude: geofence.latitude,
