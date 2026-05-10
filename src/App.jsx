@@ -384,6 +384,60 @@ const buildOpenStreetMapViewUrl = (latitude, longitude) => {
   return `https://www.openstreetmap.org/?mlat=${safeLat}&mlon=${safeLon}#map=16/${safeLat}/${safeLon}`;
 };
 
+let leafletLoadPromise = null;
+
+const loadLeaflet = () => {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Map is unavailable in this environment."));
+  }
+
+  if (window.L) {
+    return Promise.resolve(window.L);
+  }
+
+  if (leafletLoadPromise) {
+    return leafletLoadPromise;
+  }
+
+  leafletLoadPromise = new Promise((resolve, reject) => {
+    const existingScript = document.getElementById("leaflet-script-cdn");
+    const handleLoad = () => {
+      if (window.L) {
+        resolve(window.L);
+      } else {
+        reject(new Error("Leaflet failed to initialize."));
+      }
+    };
+    const handleError = () => reject(new Error("Unable to load map resources."));
+
+    if (!document.getElementById("leaflet-style-cdn")) {
+      const style = document.createElement("link");
+      style.id = "leaflet-style-cdn";
+      style.rel = "stylesheet";
+      style.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      style.crossOrigin = "";
+      document.head.appendChild(style);
+    }
+
+    if (existingScript) {
+      existingScript.addEventListener("load", handleLoad, { once: true });
+      existingScript.addEventListener("error", handleError, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = "leaflet-script-cdn";
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.async = true;
+    script.crossOrigin = "";
+    script.onload = handleLoad;
+    script.onerror = handleError;
+    document.body.appendChild(script);
+  });
+
+  return leafletLoadPromise;
+};
+
 const readBurnedMessageKeys = (walletAddress) => {
   const storageKey = getBurnedMessagesStorageKey(walletAddress);
   const raw = localStorage.getItem(storageKey);
@@ -446,11 +500,11 @@ const mergeContacts = (existingContacts = [], newContacts = []) => {
 
 
 
-const Modal = ({ isOpen, onClose, title, children }) => {
+const Modal = ({ isOpen, onClose, title, children, maxWidthClass = "max-w-md" }) => {
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-dark-800 border border-dark-700 rounded-2xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in duration-200">
+      <div className={`bg-dark-800 border border-dark-700 rounded-2xl w-full ${maxWidthClass} shadow-2xl animate-in fade-in zoom-in duration-200`}>
         <div className="flex justify-between items-center p-5 border-b border-dark-700">
           <h3 className="text-xl font-bold text-white">{title}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={24} /></button>
@@ -491,10 +545,16 @@ export default function App() {
   const [receiverLocationQuery, setReceiverLocationQuery] = useState("");
   const [receiverLocationResults, setReceiverLocationResults] = useState([]);
   const [isReceiverLocationSearching, setIsReceiverLocationSearching] = useState(false);
+  const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
+  const [isMapPickerLoading, setIsMapPickerLoading] = useState(false);
+  const [mapPickerSelection, setMapPickerSelection] = useState(null);
 
   const messagesEndRef = useRef(null);
   const burnTimersRef = useRef(new Map());
   const burnedMessageKeysRef = useRef(new Set());
+  const mapPickerContainerRef = useRef(null);
+  const mapPickerRef = useRef(null);
+  const mapPickerMarkerRef = useRef(null);
 
       // Filter messages for current chat and decrypt AES payload when allowed
       const currentChatMessages = useMemo(() => {
@@ -1008,17 +1068,25 @@ const getCurrentPosition = () =>
     );
   });
 
+const applyReceiverGeofence = ({ latitude, longitude, label }) => {
+  setReceiverGeofence({
+    latitude,
+    longitude,
+    label: label || null
+  });
+  setReceiverLocationQuery(label || `${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)}`);
+  setReceiverLocationResults([]);
+};
+
 const setReceiverGeofenceFromCurrentLocation = async () => {
   try {
     setIsLocationRefreshing(true);
     const position = await getCurrentPosition();
-    setReceiverGeofence({
+    applyReceiverGeofence({
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
       label: "My current location"
     });
-    setReceiverLocationQuery("My current location");
-    setReceiverLocationResults([]);
     toast.success("Receiver geofence set to your current location.");
   } catch (error) {
     toast.error(error.message || "Unable to set receiver geofence.");
@@ -1081,14 +1149,40 @@ const searchReceiverLocations = async () => {
 };
 
 const selectReceiverLocation = (location) => {
-  setReceiverGeofence({
+  applyReceiverGeofence({
     latitude: location.latitude,
     longitude: location.longitude,
     label: location.label
   });
-  setReceiverLocationQuery(location.label);
-  setReceiverLocationResults([]);
   toast.success("Receiver geofence location selected.");
+};
+
+const openMapPicker = () => {
+  setMapPickerSelection(
+    receiverGeofence
+      ? {
+          latitude: Number(receiverGeofence.latitude),
+          longitude: Number(receiverGeofence.longitude),
+          label: receiverGeofence.label || "Selected on map"
+        }
+      : null
+  );
+  setIsMapPickerOpen(true);
+};
+
+const confirmMapPickerSelection = () => {
+  if (!mapPickerSelection) {
+    toast.error("Click on the map to choose a location.");
+    return;
+  }
+
+  applyReceiverGeofence({
+    latitude: mapPickerSelection.latitude,
+    longitude: mapPickerSelection.longitude,
+    label: mapPickerSelection.label || "Selected on map"
+  });
+  setIsMapPickerOpen(false);
+  toast.success("Receiver geofence location selected from map.");
 };
 
 const refreshViewerLocation = async () => {
@@ -1331,6 +1425,102 @@ useEffect(() => {
   burnedMessageKeysRef.current = readBurnedMessageKeys(account);
 }, [account]);
 
+useEffect(() => {
+  if (!isMapPickerOpen || !mapPickerContainerRef.current) {
+    return;
+  }
+
+  let isCancelled = false;
+
+  const initializeMapPicker = async () => {
+    try {
+      setIsMapPickerLoading(true);
+      const L = await loadLeaflet();
+
+      if (isCancelled || !mapPickerContainerRef.current) {
+        return;
+      }
+
+      const targetLat = Number(receiverGeofence?.latitude);
+      const targetLon = Number(receiverGeofence?.longitude);
+      const hasTarget = Number.isFinite(targetLat) && Number.isFinite(targetLon);
+
+      const viewerLat = Number(viewerLocation?.latitude);
+      const viewerLon = Number(viewerLocation?.longitude);
+      const hasViewer = Number.isFinite(viewerLat) && Number.isFinite(viewerLon);
+
+      const initialLat = hasTarget ? targetLat : hasViewer ? viewerLat : 0;
+      const initialLon = hasTarget ? targetLon : hasViewer ? viewerLon : 0;
+      const initialZoom = hasTarget ? 16 : hasViewer ? 13 : 2;
+
+      const map = L.map(mapPickerContainerRef.current).setView([initialLat, initialLon], initialZoom);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19
+      }).addTo(map);
+
+      let marker = null;
+      if (hasTarget) {
+        marker = L.marker([targetLat, targetLon]).addTo(map);
+      }
+
+      map.on("click", (event) => {
+        const latitude = Number(event.latlng.lat);
+        const longitude = Number(event.latlng.lng);
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          return;
+        }
+
+        setMapPickerSelection({
+          latitude,
+          longitude,
+          label: "Selected on map"
+        });
+
+        if (marker) {
+          marker.setLatLng(event.latlng);
+        } else {
+          marker = L.marker(event.latlng).addTo(map);
+          mapPickerMarkerRef.current = marker;
+        }
+      });
+
+      mapPickerRef.current = map;
+      mapPickerMarkerRef.current = marker;
+
+      if (hasTarget) {
+        setMapPickerSelection({
+          latitude: targetLat,
+          longitude: targetLon,
+          label: receiverGeofence?.label || "Selected on map"
+        });
+      }
+
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 0);
+    } catch (error) {
+      toast.error(error.message || "Unable to load map picker.");
+    } finally {
+      if (!isCancelled) {
+        setIsMapPickerLoading(false);
+      }
+    }
+  };
+
+  initializeMapPicker();
+
+  return () => {
+    isCancelled = true;
+    if (mapPickerRef.current) {
+      mapPickerRef.current.remove();
+      mapPickerRef.current = null;
+    }
+    mapPickerMarkerRef.current = null;
+  };
+}, [isMapPickerOpen, receiverGeofence, viewerLocation]);
+
 
   // AUTO SCROLL TO BOTTOM
   useEffect(() => {
@@ -1527,7 +1717,7 @@ useEffect(() => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2">
                       <input
                         type="text"
                         value={receiverLocationQuery}
@@ -1563,6 +1753,13 @@ useEffect(() => {
                             Search Location
                           </>
                         )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openMapPicker}
+                        className="bg-dark-800 hover:bg-dark-700 border border-dark-700 rounded-xl px-3 py-2 text-sm"
+                      >
+                        Pick on Map
                       </button>
                     </div>
 
@@ -1637,6 +1834,32 @@ useEffect(() => {
           <div className="hidden md:flex flex-1 flex-col items-center justify-center text-gray-500"><MessageSquare size={48} className="mb-4 text-brand-500/50"/><p>Select a contact to chat</p></div>
         )}
       </div>
+
+      <Modal
+        isOpen={isMapPickerOpen}
+        onClose={() => setIsMapPickerOpen(false)}
+        title="Pick Receiver Location on Map"
+        maxWidthClass="max-w-5xl"
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-gray-400">Click anywhere on the map to set the receiver geofence target.</p>
+          <div className="h-72 rounded-xl border border-dark-700 overflow-hidden bg-dark-900">
+            <div ref={mapPickerContainerRef} className="h-full w-full" />
+          </div>
+          <div className="text-xs text-gray-300 bg-dark-900 border border-dark-700 rounded-lg px-3 py-2">
+            {mapPickerSelection
+              ? `Selected: ${mapPickerSelection.latitude.toFixed(6)}, ${mapPickerSelection.longitude.toFixed(6)}`
+              : "No map point selected yet"}
+          </div>
+          <button
+            onClick={confirmMapPickerSelection}
+            disabled={!mapPickerSelection || isMapPickerLoading}
+            className="w-full bg-brand-600 hover:bg-brand-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl"
+          >
+            {isMapPickerLoading ? "Loading map..." : "Use Selected Location"}
+          </button>
+        </div>
+      </Modal>
 
       <Modal isOpen={isAddContactOpen} onClose={() => setIsAddContactOpen(false)} title="Add Contact">
         <input className="w-full bg-dark-900 border border-dark-700 rounded-lg p-3 mb-3 text-white outline-none focus:border-brand-500" placeholder="Name" value={newContactName} onChange={e => setNewContactName(e.target.value)}/>
