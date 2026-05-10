@@ -488,6 +488,9 @@ export default function App() {
   const [isGeoProcessing, setIsGeoProcessing] = useState(false);
   const [viewerLocation, setViewerLocation] = useState(null);
   const [isLocationRefreshing, setIsLocationRefreshing] = useState(false);
+  const [receiverLocationQuery, setReceiverLocationQuery] = useState("");
+  const [receiverLocationResults, setReceiverLocationResults] = useState([]);
+  const [isReceiverLocationSearching, setIsReceiverLocationSearching] = useState(false);
 
   const messagesEndRef = useRef(null);
   const burnTimersRef = useRef(new Map());
@@ -1011,14 +1014,81 @@ const setReceiverGeofenceFromCurrentLocation = async () => {
     const position = await getCurrentPosition();
     setReceiverGeofence({
       latitude: position.coords.latitude,
-      longitude: position.coords.longitude
+      longitude: position.coords.longitude,
+      label: "My current location"
     });
+    setReceiverLocationQuery("My current location");
+    setReceiverLocationResults([]);
     toast.success("Receiver geofence set to your current location.");
   } catch (error) {
     toast.error(error.message || "Unable to set receiver geofence.");
   } finally {
     setIsLocationRefreshing(false);
   }
+};
+
+const searchReceiverLocations = async () => {
+  const query = receiverLocationQuery.trim();
+  if (query.length < 3) {
+    toast.error("Enter at least 3 characters to search for a location.");
+    return;
+  }
+
+  try {
+    setIsReceiverLocationSearching(true);
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&q=${encodeURIComponent(query)}`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Location search failed (${response.status}).`);
+    }
+
+    const data = await response.json();
+    const parsedResults = Array.isArray(data)
+      ? data
+          .map((item) => {
+            const latitude = Number(item.lat);
+            const longitude = Number(item.lon);
+
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+              return null;
+            }
+
+            return {
+              id: String(item.place_id || `${latitude}-${longitude}`),
+              label:
+                typeof item.display_name === "string" && item.display_name.trim()
+                  ? item.display_name.trim()
+                  : `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+              latitude,
+              longitude
+            };
+          })
+          .filter(Boolean)
+      : [];
+
+    setReceiverLocationResults(parsedResults);
+    if (parsedResults.length === 0) {
+      toast.info("No matching locations found.");
+    }
+  } catch (error) {
+    setReceiverLocationResults([]);
+    toast.error(error.message || "Unable to search locations.");
+  } finally {
+    setIsReceiverLocationSearching(false);
+  }
+};
+
+const selectReceiverLocation = (location) => {
+  setReceiverGeofence({
+    latitude: location.latitude,
+    longitude: location.longitude,
+    label: location.label
+  });
+  setReceiverLocationQuery(location.label);
+  setReceiverLocationResults([]);
+  toast.success("Receiver geofence location selected.");
 };
 
 const refreshViewerLocation = async () => {
@@ -1452,10 +1522,67 @@ useEffect(() => {
                       />
                       <div className="bg-dark-800 border border-dark-700 rounded-xl px-3 py-2 text-xs text-gray-300">
                         {receiverGeofence
-                          ? `Target: ${receiverGeofence.latitude.toFixed(6)}, ${receiverGeofence.longitude.toFixed(6)}`
+                          ? `Target: ${receiverGeofence.label ? `${receiverGeofence.label} · ` : ""}${receiverGeofence.latitude.toFixed(6)}, ${receiverGeofence.longitude.toFixed(6)}`
                           : "Geofence target not set"}
                       </div>
                     </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                      <input
+                        type="text"
+                        value={receiverLocationQuery}
+                        onChange={(event) => {
+                          setReceiverLocationQuery(event.target.value);
+                          if (receiverLocationResults.length) {
+                            setReceiverLocationResults([]);
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            searchReceiverLocations();
+                          }
+                        }}
+                        placeholder="Search receiver location (city, address, place)"
+                        className="bg-dark-800 border border-dark-700 rounded-xl px-3 py-2 text-sm focus:border-brand-500 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={searchReceiverLocations}
+                        disabled={isReceiverLocationSearching || receiverLocationQuery.trim().length < 3}
+                        className="bg-dark-800 hover:bg-dark-700 border border-dark-700 rounded-xl px-3 py-2 text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {isReceiverLocationSearching ? (
+                          <>
+                            <Loader2 size={16} className="animate-spin" />
+                            Searching...
+                          </>
+                        ) : (
+                          <>
+                            <Search size={16} />
+                            Search Location
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {receiverLocationResults.length > 0 && (
+                      <div className="max-h-52 overflow-y-auto rounded-xl border border-dark-700 bg-dark-800 divide-y divide-dark-700">
+                        {receiverLocationResults.map((location) => (
+                          <button
+                            key={location.id}
+                            type="button"
+                            onClick={() => selectReceiverLocation(location)}
+                            className="w-full text-left px-3 py-2 hover:bg-dark-700/80 transition-colors"
+                          >
+                            <div className="text-sm text-gray-100">{location.label}</div>
+                            <div className="text-[11px] text-gray-400 mt-1">
+                              {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
 
                     {receiverGeofence && (
                       <div className="space-y-2">
